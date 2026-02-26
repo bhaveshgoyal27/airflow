@@ -6,7 +6,7 @@ The Provider Governance Dashboard is an Airflow plugin that collects GitHub metr
 
 ## Architecture Diagram (Draft v1)
 
-![System Architecture](architecture_diagram_v1.png)
+![System Architecture](diagrams/architecture_diagram_v1.png)
 
 ## Components
 
