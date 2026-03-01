@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from fastapi import BackgroundTasks, Depends, HTTPException, status
+from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-# Reuse Airflow's existing FastAPI dependencies — DO NOT create your own
 from airflow.api_fastapi.common.db.common import SessionDep
-from airflow.api_fastapi.core_api.datamodels.provider_governance import (MetricSnapshotResponse,
-                                                                         ProviderHealthBody,
-                                                                         ProviderHealthCollectionResponse,
-                                                                         ProviderHealthResponse)
-from airflow.api_fastapi.core_api.router import APIRouter
+from airflow.api_fastapi.common.router import AirflowRouter
+from airflow.api_fastapi.core_api.datamodels.provider_governance import (
+    MetricSnapshotResponse,
+    ProviderHealthBody,
+    ProviderHealthCollectionResponse,
+    ProviderHealthResponse,
+)
 from airflow.models.provider_health import ProviderHealth, ProviderMetricSnapshot
 
-# Reuse Airflow's router factory, which wires in auth + error handling
-provider_governance_router = APIRouter(
+provider_governance_router = AirflowRouter(
     prefix="/providerGovernance",
     tags=["Provider Governance"],
 )
@@ -24,9 +23,7 @@ provider_governance_router = APIRouter(
     "",
     response_model=ProviderHealthCollectionResponse,
 )
-def list_providers(
-    session: Session = SessionDep,
-) -> ProviderHealthCollectionResponse:
+def list_providers(session: SessionDep) -> ProviderHealthCollectionResponse:
     providers = session.scalars(select(ProviderHealth)).all()
     return ProviderHealthCollectionResponse(
         providers=[_to_response(p) for p in providers],
@@ -39,10 +36,7 @@ def list_providers(
     response_model=ProviderHealthResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_provider(
-    body: ProviderHealthBody,
-    session: Session = SessionDep,
-) -> ProviderHealthResponse:
+def create_provider(body: ProviderHealthBody, session: SessionDep) -> ProviderHealthResponse:
     existing = session.scalar(select(ProviderHealth).where(ProviderHealth.name == body.name))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Provider '{body.name}' already exists")
@@ -60,12 +54,11 @@ def create_provider(
 def refresh_provider(
     provider_id: int,
     background_tasks: BackgroundTasks,
-    session: Session = SessionDep,
+    session: SessionDep,
 ) -> dict:
     provider = session.get(ProviderHealth, provider_id)
     if not provider:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
-    # Import here to avoid circular imports at module load time
     from airflow.api_fastapi.core_api.services.provider_governance import collect_provider_metrics
     background_tasks.add_task(collect_provider_metrics, provider_id)
     return {"status": "collection_started", "provider_id": provider_id}
@@ -77,8 +70,8 @@ def refresh_provider(
 )
 def get_provider_metrics(
     provider_id: int,
+    session: SessionDep,
     limit: int = 30,
-    session: Session = SessionDep,
 ) -> list[MetricSnapshotResponse]:
     snapshots = session.scalars(
         select(ProviderMetricSnapshot)
