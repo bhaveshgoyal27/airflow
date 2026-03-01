@@ -46,6 +46,8 @@ import { Jobs } from "src/pages/Jobs";
 import { MappedTaskInstance } from "src/pages/MappedTaskInstance";
 import { Plugins } from "src/pages/Plugins";
 import { Pools } from "src/pages/Pools";
+import { ProviderGovernance } from "src/pages/ProviderGovernance";
+import { ProviderDetail } from "src/pages/ProviderGovernance/ProviderDetail";
 import { Providers } from "src/pages/Providers";
 import { Run } from "src/pages/Run";
 import { AssetEvents as DagRunAssetEvents } from "src/pages/Run/AssetEvents";
@@ -53,7 +55,7 @@ import { Details as DagRunDetails } from "src/pages/Run/Details";
 import { Security } from "src/pages/Security";
 import { Task } from "src/pages/Task";
 import { Overview as TaskOverview } from "src/pages/Task/Overview";
-import { TaskInstance, Logs } from "src/pages/TaskInstance";
+import { Logs, TaskInstance } from "src/pages/TaskInstance";
 import { AssetEvents as TaskInstanceAssetEvents } from "src/pages/TaskInstance/AssetEvents";
 import { Details as TaskInstanceDetails } from "src/pages/TaskInstance/Details";
 import { HITLResponse } from "src/pages/TaskInstance/HITLResponse";
@@ -160,6 +162,14 @@ export const routerConfig = [
       {
         element: <Jobs />,
         path: "jobs",
+      },
+      {
+        path: "/provider-governance",
+        element: <ProviderGovernance />,
+      },
+      {
+        path: "/provider-governance/:providerId",
+        element: <ProviderDetail />,
       },
       pluginRoute,
       {
