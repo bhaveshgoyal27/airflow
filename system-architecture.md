@@ -6,7 +6,7 @@ The Provider Governance Dashboard is an Airflow plugin that collects GitHub metr
 
 ## Architecture Diagram (Draft v1)
 
-![System Architecture](architecture_diagram_v1.png)
+![System Architecture](diagrams/architecture_diagram_v1.png)
 
 ## Components
 
@@ -40,7 +40,7 @@ The Provider Governance Dashboard is an Airflow plugin that collects GitHub metr
 | `/providers/{id}/collect` | POST | Trigger ad-hoc metrics collection for a provider (async) |
 | `/metrics/provider/{id}` | GET | Retrieve historical metric snapshots for trend analysis |
 
-### Database (SQLite / PostgreSQL)
+### Database (SQLite)
 
 #### `providers` table
 Stores the registry of tracked providers.
@@ -65,17 +65,12 @@ Stores temporal metric snapshots. Each collection creates a new row, preserving 
 | provider_id | Integer (FK) | References `providers.id` |
 | collected_at | DateTime | When this snapshot was taken |
 | pr_total | Integer | Total PRs in collection window |
-| pr_merged | Integer | Merged PRs |
-| pr_open | Integer | Open PRs |
-| pr_avg_review_latency_hours | Float | Average time to first review |
 | issue_total | Integer | Total issues |
 | issue_open | Integer | Open issues |
 | issue_closed | Integer | Closed issues |
 | issue_avg_resolution_hours | Float | Average time to close |
 | contributor_count | Integer | Unique contributors |
 | commit_count_30d | Integer | Commits in last 30 days |
-| release_count_90d | Integer | Releases in last 90 days |
-| last_release_date | DateTime | Most recent release date |
 | health_score | Float | Computed health score (0-100) |
 | score_breakdown | JSON | Detailed scoring dimensions |
 
