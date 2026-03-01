@@ -42,7 +42,11 @@ _AIRFLOW_PATH = Path(__file__).parents[3]
 def init_views(app: FastAPI) -> None:
     """Init views by registering the different routers."""
     from airflow.api_fastapi.core_api.routes.public import public_router
+    from airflow.api_fastapi.core_api.routes.public.provider_governance import \
+        provider_governance_router  # ← ADD
     from airflow.api_fastapi.core_api.routes.ui import ui_router
+
+    public_router.include_router(provider_governance_router)  # ← ADD
 
     app.include_router(ui_router)
     app.include_router(public_router)
