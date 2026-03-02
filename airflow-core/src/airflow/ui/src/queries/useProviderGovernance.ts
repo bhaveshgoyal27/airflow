@@ -18,7 +18,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-const BASE = "/api/v1/providerGovernance";
+const BASE = "/api/v2/providerGovernance";
 
 export type MetricSnapshot = {
   id: number;
