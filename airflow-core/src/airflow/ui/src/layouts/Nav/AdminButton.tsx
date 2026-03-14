@@ -27,30 +27,51 @@ import type { NavItemResponse } from "src/utils/types";
 import { NavButton } from "./NavButton";
 import { PluginMenuItem } from "./PluginMenuItem";
 
-const links = [
+type AdminLink = {
+  href: string;
+  title: string;
+  /**
+   * Optional menu item that controls visibility.
+   * When omitted, the item is always shown.
+   */
+  visibleWhenMenuItem?: MenuItem;
+};
+
+const links: Array<AdminLink> = [
   {
     href: "/variables",
     title: "Variables",
+    visibleWhenMenuItem: "Variables",
   },
   {
     href: "/pools",
     title: "Pools",
+    visibleWhenMenuItem: "Pools",
   },
   {
     href: "/providers",
     title: "Providers",
+    visibleWhenMenuItem: "Providers",
+  },
+  {
+    href: "/provider-governance",
+    title: "ProviderGovernance",
+    visibleWhenMenuItem: "Providers",
   },
   {
     href: "/plugins",
     title: "Plugins",
+    visibleWhenMenuItem: "Plugins",
   },
   {
     href: "/connections",
     title: "Connections",
+    visibleWhenMenuItem: "Connections",
   },
   {
     href: "/configs",
     title: "Config",
+    visibleWhenMenuItem: "Config",
   },
 ];
 
@@ -63,11 +84,25 @@ export const AdminButton = ({
 }) => {
   const { t: translate } = useTranslation("common");
   const menuItems = links
-    .filter(({ title }) => authorizedMenuItems.includes(title as MenuItem))
+    .filter(
+      ({ visibleWhenMenuItem }) =>
+        // Show only when the user has access to the controlling menu item
+        visibleWhenMenuItem === undefined ||
+        authorizedMenuItems.includes(visibleWhenMenuItem),
+    )
     .map((link) => (
       <Menu.Item asChild key={link.title} value={link.title}>
-        <RouterLink aria-label={translate(`admin.${link.title}`)} to={link.href}>
-          {translate(`admin.${link.title}`)}
+        <RouterLink
+          aria-label={
+            link.title === "ProviderGovernance"
+              ? "Provider Governance"
+              : translate(`admin.${link.title}`)
+          }
+          to={link.href}
+        >
+          {link.title === "ProviderGovernance"
+            ? "Provider Governance"
+            : translate(`admin.${link.title}`)}
         </RouterLink>
       </Menu.Item>
     ));

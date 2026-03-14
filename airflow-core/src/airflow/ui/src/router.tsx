@@ -47,6 +47,8 @@ import { MappedTaskInstance } from "src/pages/MappedTaskInstance";
 import { Plugins } from "src/pages/Plugins";
 import { Pools } from "src/pages/Pools";
 import { Providers } from "src/pages/Providers";
+import ProviderGovernance from "src/pages/ProviderGovernance";
+import ProviderGovernanceDetail from "src/pages/ProviderGovernanceDetail";
 import { Run } from "src/pages/Run";
 import { AssetEvents as DagRunAssetEvents } from "src/pages/Run/AssetEvents";
 import { Details as DagRunDetails } from "src/pages/Run/Details";
@@ -140,6 +142,14 @@ export const routerConfig = [
       {
         element: <Pools />,
         path: "pools",
+      },
+      {
+        element: <ProviderGovernance />,
+        path: "provider-governance",
+      },
+      {
+        element: <ProviderGovernanceDetail />,
+        path: "provider-governance/:providerId",
       },
       {
         element: <Providers />,
