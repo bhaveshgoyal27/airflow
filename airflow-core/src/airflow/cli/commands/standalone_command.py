@@ -45,6 +45,31 @@ FORCE_COLOR = bool(os.environ.get("FORCE_COLOR", ""))
 NO_COLOR = bool(os.environ.get("NO_COLOR", ""))
 
 
+def _collect_provider_metrics_on_startup() -> None:
+    """Run provider governance metrics collection for all providers (used in a background thread)."""
+    log = logging.getLogger(__name__)
+    try:
+        from airflow.models.provider_governance import Provider
+        from airflow.provider_governance.github_metrics import collect_provider_metrics
+        from airflow.utils.session import create_session
+
+        with create_session() as session:
+            providers = session.query(Provider).all()
+            for p in providers:
+                try:
+                    collect_provider_metrics(p.id)
+                except Exception as e:
+                    log.warning("Failed to collect metrics for provider %s: %s", p.name, e)
+    except Exception as e:
+        log.warning("Provider governance metrics collection failed: %s", e)
+
+
+def _start_provider_metrics_collection() -> None:
+    """Start a daemon thread to collect provider metrics so standalone UI has per-provider data."""
+    thread = threading.Thread(target=_collect_provider_metrics_on_startup, daemon=True)
+    thread.start()
+
+
 class StandaloneCommand:
     """
     Runs all components of Airflow under a single parent process.
@@ -221,6 +246,8 @@ class StandaloneCommand:
         self.print_output("standalone", "Checking database is initialized")
         db.initdb()
         self.print_output("standalone", "Database ready")
+        # Collect provider governance metrics in background so UI has per-provider data
+        _start_provider_metrics_collection()
 
     def is_ready(self):
         """
