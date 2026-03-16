@@ -16,8 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Badge, Box, Flex, Heading, HStack, Input, NativeSelect, SimpleGrid, Spacer, Table, Text } from "@chakra-ui/react";
+import { Badge, Box, Button, Flex, Heading, HStack, Input, NativeSelect, SimpleGrid, Spacer, Table, Text } from "@chakra-ui/react";
+import { useCallback, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
+import { toaster } from "src/components/ui";
+import { getRedirectPath } from "src/utils/links";
 
 const summary = {
   avgResolutionHours: 125,
@@ -127,7 +130,51 @@ const ProviderRow = ({
   );
 };
 
-const ProviderGovernance = () => (
+const ProviderGovernance = () => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    const origin = window.location.origin;
+    try {
+      const providersRes = await fetch(
+        `${origin}${getRedirectPath("ui/provider-governance/providers")}`,
+      );
+      if (!providersRes.ok) {
+        throw new Error("Failed to fetch providers");
+      }
+      const providersList: { id: number; name: string; display_name: string }[] =
+        await providersRes.json();
+      for (const provider of providersList) {
+        const syncRes = await fetch(
+          `${origin}${getRedirectPath(`ui/provider-governance/sync/${provider.id}`)}`,
+          { method: "POST" },
+        );
+        if (!syncRes.ok) {
+          const err = await syncRes.json().catch(() => ({}));
+          throw new Error(
+            (err as { detail?: string })?.detail ??
+              `Sync failed for ${provider.display_name}`,
+          );
+        }
+      }
+      toaster.create({
+        title: "Refresh complete",
+        description: `Updated metrics for ${providersList.length} provider(s).`,
+        type: "success",
+      });
+    } catch (err) {
+      toaster.create({
+        title: "Refresh failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        type: "error",
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  return (
   <Box overflow="auto" px={{ base: 2, md: 4 }} py={4}>
     <Flex alignItems="baseline" justifyContent="space-between" mb={4}>
       <Box>
@@ -140,6 +187,14 @@ const ProviderGovernance = () => (
         </Text>
       </Box>
       <HStack gap={3}>
+        <Button
+          loading={isRefreshing}
+          onClick={handleRefresh}
+          size="sm"
+          variant="outline"
+        >
+          Refresh metrics
+        </Button>
         <NativeSelect.Root size="sm" width="180px">
     <NativeSelect.Field>
           <option>Current cycle</option>
@@ -165,7 +220,7 @@ const ProviderGovernance = () => (
         <Text color="fg.muted" fontSize="xs" textTransform="uppercase">
           Health Summary
         </Text>
-        <HStack mt={3} spacing={4}>
+        <HStack gap={4} mt={3}>
           <Badge borderRadius="full" colorPalette="green" px={3} py={1} variant="subtle">
             Healthy {summary.healthy}
           </Badge>
@@ -243,7 +298,7 @@ const ProviderGovernance = () => (
       <Flex alignItems="center" mb={4}>
         <Heading size="md">All Providers</Heading>
         <Spacer />
-        <HStack spacing={3}>
+        <HStack gap={3}>
           <Input placeholder="Search providers or tags..." size="sm" width="260px" />
           <NativeSelect.Root size="sm" width="160px">
           <NativeSelect.Field>
@@ -324,5 +379,6 @@ const ProviderGovernance = () => (
       </Table.Root>
     </Box>
   </Box>
-);
+  );
+};
 export default ProviderGovernance;
