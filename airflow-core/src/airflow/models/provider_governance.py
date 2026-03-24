@@ -55,6 +55,11 @@ class Provider(Base):
         back_populates="provider",
         cascade="all, delete-orphan",
     )
+    metrics_pr = relationship(
+        "ProviderMetricPR",
+        back_populates="provider",
+        cascade="all, delete-orphan",
+    )
 
 
 class ProviderMetric(Base):
@@ -81,4 +86,30 @@ class ProviderMetric(Base):
     )
 
     provider = relationship("Provider", back_populates="metrics")
+
+
+class ProviderMetricPR(Base):
+    """Per-provider pull request rows (mirrors provider_metrics structure)."""
+
+    __tablename__ = "provider_metrics_pr"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False)
+
+    link = Column(Text, nullable=False)
+    heading = Column(Text, nullable=False)
+    date_open = Column(Date, nullable=False)
+    date_close = Column(Date, nullable=True)
+    status = Column(String(16), nullable=False, server_default="OPEN")
+    contributor_count = Column(Integer, nullable=False, server_default=sa.text("0"))
+    commit_count = Column(Integer, nullable=False, server_default=sa.text("0"))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('OPEN', 'CLOSED')",
+            name="provider_metrics_pr_status_check",
+        ),
+    )
+
+    provider = relationship("Provider", back_populates="metrics_pr")
 

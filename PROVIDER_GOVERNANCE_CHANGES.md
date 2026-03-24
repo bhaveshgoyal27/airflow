@@ -123,3 +123,36 @@ airflow db upgrade
 - **Backend API:** Add FastAPI (or equivalent) endpoints that read from `providers` and `provider_metrics` and return data for the overview and detail pages; have the UI call them using `providerId` and other params.
 - **Detail page data:** Use `providerId` from the URL to fetch the corresponding provider and metrics and replace the static `SNOWFLAKE_DETAIL` with API response.
 - **Charts:** Reintroduce line charts (e.g. Health Score Over Time, Open Issue Count Over Time) on the overview page using the same patterns as other charts in the repo (e.g. Chart.js + theme tokens) once data is available from the backend.
+
+---
+
+## 9. `provider_metrics_pr` table & PR sync
+
+- **Model:** `ProviderMetricPR` in `airflow-core/src/airflow/models/provider_governance.py` — same column shape as `ProviderMetric` (per-row PR links/titles/dates/status), table name **`provider_metrics_pr`**.
+- **Migration:** `0108_3_2_0_add_provider_metrics_pr_table.py` (`0108_add_provider_metrics_pr`), chains after `0107_seed_provider_governance`.
+- **Logic:** `airflow-core/src/airflow/provider_governance/github_metrics.py`
+  - `fetch_open_pulls_from_github` — GitHub `/repos/{owner}/{repo}/pulls?state=open` with optional labels.
+  - `sync_provider_prs_from_github` — mirrors issue sync: insert new PR rows, leave existing, close stale `OPEN` rows using `ProviderMetricPR`.
+- **API:** `POST /ui/provider-governance/sync-pr/{provider_id}` — same response shape as issue sync (`added`, `updated`, `unchanged`).
+- **Optional:** `GET /ui/provider-governance/fetch-pulls` — read-only list of open PRs (for debugging).
+
+---
+
+## 10. Create provider (API + UI)
+
+- **API:** `POST /ui/provider-governance/providers` with JSON body: `name`, `display_name`, `lifecycle`, `is_active`, `steward_email`. Returns the created row; `409` if `name` already exists.
+- **UI:** “Add provider” opens a dialog; saves via the API. Overview loads providers from `GET /ui/provider-governance/providers` (no hardcoded four providers).
+
+---
+
+## 11. Removing default seeded providers
+
+- **Migration `0107`** is now a **no-op** (no automatic insert of four providers on upgrade).
+- **Migration `0109_3_2_0_remove_provider_governance_default_providers.py`** deletes rows where `name` is one of `google`, `amazon`, `snowflake`, `microsoft-azure` (matches the old seed). Downgrade re-inserts those four if missing.
+- Run `airflow db upgrade` to apply `0108`–`0109` after `0107`.
+
+---
+
+## 12. Refresh metrics (issues + PRs)
+
+- **UI “Refresh metrics”** calls, for each provider: `POST .../sync/{id}` then `POST .../sync-pr/{id}`.

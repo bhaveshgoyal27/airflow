@@ -21,10 +21,14 @@ from __future__ import annotations
 
 from airflow.provider_governance.github_metrics import (
     fetch_open_issues_from_github,
+    fetch_open_pulls_from_github,
     sync_provider_issues_from_github,
+    sync_provider_prs_from_github,
 )
 
 __all__ = [
     "fetch_open_issues_from_github",
+    "fetch_open_pulls_from_github",
     "sync_provider_issues_from_github",
+    "sync_provider_prs_from_github",
 ]

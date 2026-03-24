@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from sqlalchemy import func, select
 
-from airflow.models.provider_governance import Provider, ProviderMetric
+from airflow.models.provider_governance import Provider, ProviderMetric, ProviderMetricPR
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -399,6 +399,319 @@ def sync_provider_issues_from_github(
     result = {"added": added, "updated": updated, "unchanged": unchanged}
     log.info(
         "Provider governance sync: provider=%s result added=%s updated=%s unchanged=%s",
+        provider_name,
+        added,
+        updated,
+        unchanged,
+    )
+    return result
+
+
+def fetch_open_pulls_from_github(
+    owner: str = DEFAULT_GITHUB_OWNER,
+    repo: str = DEFAULT_GITHUB_REPO,
+    labels: list[str] | None = None,
+    token: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Fetch all open pull requests from a GitHub repository.
+
+    Uses the pulls API (not issues). Optional label filter.
+    """
+    headers: dict[str, str] = {
+        "Accept": "application/vnd.github.v3+json",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    params: dict[str, str | int] = {
+        "state": "open",
+        "per_page": 100,
+    }
+    if labels:
+        params["labels"] = ",".join(labels)
+
+    all_pulls: list[dict[str, Any]] = []
+    page = 1
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls"
+    log.info(
+        "GitHub API: GET %s (pulls) params=%s",
+        url,
+        params,
+        extra={"owner": owner, "repo": repo, "labels": labels},
+    )
+
+    with httpx.Client(timeout=30.0) as client:
+        while True:
+            params["page"] = page
+            resp = client.get(url, headers=headers, params=params)
+            log.info(
+                "GitHub API pulls response: status=%s for %s page=%s",
+                resp.status_code,
+                url,
+                page,
+            )
+            if resp.status_code == 403:
+                log.warning(
+                    "GitHub API rate limit (403). Set GITHUB_TOKEN or "
+                    "AIRFLOW_PROVIDER_GOVERNANCE_GITHUB_TOKEN for higher limits."
+                )
+                return []
+            resp.raise_for_status()
+            data = resp.json()
+            if not data:
+                break
+            all_pulls.extend(data)
+            if len(data) < 100:
+                break
+            page += 1
+
+    log.info(
+        "GitHub API: got %s open pulls (labels=%s)",
+        len(all_pulls),
+        labels,
+    )
+    return all_pulls
+
+
+def _parse_pr_number_from_url(html_url: str, owner: str, repo: str) -> int | None:
+    """Extract PR number from GitHub pull URL."""
+    try:
+        suffix = f"/{owner}/{repo}/pull/"
+        if suffix in html_url:
+            rest = html_url.split(suffix, 1)[1]
+            return int(rest.split("/")[0].split("?")[0])
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def _fetch_single_pull(
+    owner: str,
+    repo: str,
+    pull_number: int,
+    token: str | None = None,
+) -> dict[str, Any] | None:
+    """Fetch a single pull request by number."""
+    headers: dict[str, str] = {
+        "Accept": "application/vnd.github.v3+json",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pull_number}"
+    with httpx.Client(timeout=15.0) as client:
+        resp = client.get(url, headers=headers)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+
+def _filter_pulls_by_provider_label(
+    pulls: list[dict[str, Any]],
+    provider_name: str,
+) -> list[dict[str, Any]]:
+    """Keep only PRs whose labels include this provider."""
+    if not provider_name:
+        return pulls
+    want = {f"provider:{provider_name}", f"area:providers:{provider_name}"}
+    out = []
+    for pull in pulls:
+        labels = pull.get("labels") or []
+        names = {str(l.get("name") or "").strip() for l in labels if isinstance(l, dict)}
+        if names & want:
+            out.append(pull)
+        else:
+            log.debug(
+                "Skipping PR %s (labels=%s) for provider %s",
+                pull.get("number"),
+                names,
+                provider_name,
+            )
+    return out
+
+
+def _ensure_placeholder_pr_metric(
+    session: Session,
+    provider_id: int,
+    provider_name: str,
+) -> None:
+    """If provider has no PR metrics, insert one placeholder row."""
+    count = session.scalar(
+        select(func.count()).select_from(ProviderMetricPR).where(
+            ProviderMetricPR.provider_id == provider_id
+        )
+    )
+    if count and count > 0:
+        return
+    placeholder = ProviderMetricPR(
+        provider_id=provider_id,
+        link=f"https://github.com/apache/airflow/pulls?q=is%3Aopen+is%3Apr+label%3Aarea%3Aproviders%3A{provider_name}",
+        heading=f"(No open PRs with label area:providers:{provider_name} — placeholder)",
+        date_open=date.today(),
+        date_close=None,
+        status="OPEN",
+        contributor_count=0,
+        commit_count=0,
+    )
+    session.add(placeholder)
+    log.info(
+        "Provider governance PR sync: inserted placeholder for provider %s",
+        provider_name,
+    )
+
+
+def _add_new_prs(
+    session: Session,
+    provider_id: int,
+    open_pulls: list[dict[str, Any]],
+    existing_by_link: dict[str, ProviderMetricPR],
+) -> tuple[int, int]:
+    added = 0
+    unchanged = 0
+    for pull in open_pulls:
+        link = (pull.get("html_url") or "").strip().rstrip("/")
+        if not link:
+            continue
+        if link in existing_by_link:
+            unchanged += 1
+            continue
+        date_open_val = _parse_github_date(pull.get("created_at")) or date.today()
+        new_row = ProviderMetricPR(
+            provider_id=provider_id,
+            link=link,
+            heading=(pull.get("title") or "").strip() or "(no title)",
+            date_open=date_open_val,
+            date_close=None,
+            status="OPEN",
+            contributor_count=0,
+            commit_count=0,
+        )
+        session.add(new_row)
+        existing_by_link[link] = new_row
+        added += 1
+    return added, unchanged
+
+
+def _close_stale_pr_metrics(
+    existing: list[ProviderMetricPR],
+    open_pr_links: set[str],
+    repo_owner: str,
+    repo_name: str,
+    github_token: str | None,
+) -> int:
+    updated = 0
+    for metric in existing:
+        if metric.status != "OPEN":
+            continue
+        link_normalized = metric.link.strip().rstrip("/")
+        if link_normalized in open_pr_links:
+            continue
+        pr_number = _parse_pr_number_from_url(metric.link, repo_owner, repo_name)
+        date_close_val = None
+        if pr_number is not None:
+            single = _fetch_single_pull(repo_owner, repo_name, pr_number, token=github_token)
+            if single:
+                # Prefer merged_at, then closed_at
+                date_close_val = _parse_github_date(single.get("merged_at")) or _parse_github_date(
+                    single.get("closed_at")
+                )
+        if date_close_val is None:
+            date_close_val = date.today()
+        metric.date_close = date_close_val
+        metric.status = "CLOSED"
+        metric.contributor_count = 0
+        metric.commit_count = 0
+        updated += 1
+    return updated
+
+
+def sync_provider_prs_from_github(
+    provider_id: int,
+    session: Session,
+    *,
+    repo_owner: str = DEFAULT_GITHUB_OWNER,
+    repo_name: str = DEFAULT_GITHUB_REPO,
+    github_token: str | None = None,
+) -> dict[str, int]:
+    """
+    Sync provider_metrics_pr from GitHub open pull requests for the given provider.
+
+    Same behavior as issue sync: insert new, leave existing, close stale OPEN rows.
+    """
+    provider = session.scalar(select(Provider).where(Provider.id == provider_id))
+    if not provider:
+        raise ValueError(f"Provider with id={provider_id} not found")
+
+    provider_name = provider.name
+    label_primary = [f"provider:{provider_name}"] if provider_name else None
+    label_fallback = [f"area:providers:{provider_name}"] if provider_name else None
+
+    log.info(
+        "Provider governance PR sync: provider_id=%s name=%s",
+        provider_id,
+        provider_name,
+    )
+    open_pulls = fetch_open_pulls_from_github(
+        owner=repo_owner,
+        repo=repo_name,
+        labels=label_primary,
+        token=github_token,
+    )
+    log.info(
+        "Provider governance PR sync: provider=%s fetched %s open pulls (label=%s)",
+        provider_name,
+        len(open_pulls),
+        label_primary,
+    )
+
+    if len(open_pulls) == 0 and label_fallback and label_fallback != label_primary:
+        open_pulls = fetch_open_pulls_from_github(
+            owner=repo_owner,
+            repo=repo_name,
+            labels=label_fallback,
+            token=github_token,
+        )
+        log.info(
+            "Provider governance PR sync: provider=%s fallback label %s fetched %s pulls",
+            provider_name,
+            label_fallback,
+            len(open_pulls),
+        )
+
+    open_pulls = _filter_pulls_by_provider_label(open_pulls, provider_name)
+    if len(open_pulls) == 0:
+        log.warning(
+            "Provider governance PR sync: provider=%s has 0 pulls from GitHub; inserting placeholder",
+            provider_name,
+        )
+        _ensure_placeholder_pr_metric(session, provider_id, provider_name)
+
+    open_pr_links = {
+        (pull.get("html_url") or "").strip().rstrip("/")
+        for pull in open_pulls
+        if (pull.get("html_url") or "").strip()
+    }
+
+    existing = (
+        session.scalars(
+            select(ProviderMetricPR).where(ProviderMetricPR.provider_id == provider_id)
+        )
+        .unique()
+        .all()
+    )
+    existing_by_link = {m.link.rstrip("/"): m for m in existing}
+
+    added, unchanged = _add_new_prs(session, provider_id, open_pulls, existing_by_link)
+    updated = _close_stale_pr_metrics(
+        existing, open_pr_links, repo_owner, repo_name, github_token
+    )
+
+    session.commit()
+    result = {"added": added, "updated": updated, "unchanged": unchanged}
+    log.info(
+        "Provider governance PR sync: provider=%s result added=%s updated=%s unchanged=%s",
         provider_name,
         added,
         updated,

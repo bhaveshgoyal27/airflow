@@ -16,15 +16,20 @@
 # specific language governing permissions and limitations
 # under the License.
 """
-Seed provider governance with the four default providers.
+Placeholder revision (no default provider seed).
 
-Ensures microsoft-azure, amazon, snowflake, and google exist in the providers
-table after every db init/upgrade. Idempotent: skips insert if name already exists.
+Originally seeded four providers; seeding was removed in favor of the Provider
+Governance UI / API. Existing databases that already applied the old seed can
+run migration 0109_remove_provider_governance_defaults to delete those rows.
+
+Revision ID: 0107_seed_provider_governance
+Revises: 0106_add_provider_metric_snapshots
+Create Date: 2026-03-15 00:00:00.000000
+
 """
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -34,41 +39,10 @@ branch_labels = None
 depends_on = None
 airflow_version = "3.2.0"
 
-DEFAULT_PROVIDERS = [
-    ("google", "Google Cloud Platform"),
-    ("amazon", "Amazon Web Services"),
-    ("snowflake", "Snowflake"),
-    ("microsoft-azure", "Microsoft Azure"),
-]
-
 
 def upgrade():
-    """Insert the four default providers if they do not already exist."""
-    conn = op.get_bind()
-    for name, display_name in DEFAULT_PROVIDERS:
-        # Idempotent: only insert when name is missing
-        if conn.dialect.name == "sqlite":
-            conn.execute(
-                sa.text("""
-                    INSERT OR IGNORE INTO providers
-                    (name, display_name, lifecycle, is_active, steward_email)
-                    VALUES (:name, :display_name, 'production', 1, 'bg487@cornell.edu')
-                """),
-                {"name": name, "display_name": display_name},
-            )
-        else:
-            conn.execute(
-                sa.text("""
-                    INSERT INTO providers (name, display_name, lifecycle, is_active, steward_email)
-                    SELECT :name, :display_name, 'production', 1, 'bg487@cornell.edu'
-                    WHERE NOT EXISTS (SELECT 1 FROM providers WHERE name = :name)
-                """),
-                {"name": name, "display_name": display_name},
-            )
+    """No-op: providers are added via UI or API, not migration seed."""
 
 
 def downgrade():
-    """Remove the four default providers by name."""
-    conn = op.get_bind()
-    for name, _ in DEFAULT_PROVIDERS:
-        conn.execute(sa.text("DELETE FROM providers WHERE name = :name"), {"name": name})
+    """No-op."""
