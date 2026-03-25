@@ -32,7 +32,7 @@ import {
   Table,
   Text,
 } from "@chakra-ui/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Checkbox } from "src/components/ui/Checkbox";
 import { Dialog, toaster } from "src/components/ui";
@@ -47,14 +47,77 @@ type ApiProvider = {
   readonly steward_email: string;
 };
 
-/** Placeholder summary until metrics are aggregated in the API. */
-const summary = {
-  avgResolutionHours: 125,
-  contributors: 66,
-  critical: 1,
-  healthy: 2,
-  totalIssues: 762,
-  warning: 1,
+type ApiProviderSummaryRow = {
+  readonly avg_resolution_hours: number | null;
+  readonly commits_30d: number;
+  readonly contributors: number;
+  readonly issues_closed: number;
+  readonly issues_open: number;
+  readonly issues_total: number;
+  readonly pr_merge_rate: number;
+  readonly prs_closed: number;
+  readonly prs_open: number;
+  readonly prs_total: number;
+  readonly provider_id: number;
+};
+
+type HealthStatus = "healthy" | "warning" | "critical";
+
+type DummyProviderMetrics = {
+  readonly healthScore: number; // 0-100
+  readonly healthStatus: HealthStatus;
+  readonly avgResolutionHours: number | null;
+  readonly commits30d: number;
+  readonly contributors: number;
+  readonly openIssues: number;
+  readonly prMergeRate: number;
+  readonly prVolume: number;
+};
+
+type ProviderWithMetrics = ApiProvider & {
+  readonly metrics: DummyProviderMetrics;
+};
+
+const getHealthStatus = (healthScore: number): HealthStatus => {
+  if (healthScore >= 70) return "healthy";
+  if (healthScore >= 40) return "warning";
+  return "critical";
+};
+
+const getDummyMetrics = (provider: ApiProvider): DummyProviderMetrics => {
+  // Deterministic dummy scorer until the backend health scoring lands.
+  const seed = provider.id * 9973 + provider.name.length * 7919;
+  const healthScore = seed % 101; // 0-100
+  const healthStatus = getHealthStatus(healthScore);
+
+  return {
+    healthScore,
+    healthStatus,
+    avgResolutionHours: null,
+    commits30d: 0,
+    contributors: 0,
+    openIssues: 0,
+    prMergeRate: 0,
+    prVolume: 0,
+  };
+};
+
+const getHealthBadgeProps = (
+  status: HealthStatus,
+): {
+  readonly colorPalette: string;
+  readonly label: string;
+} => {
+  switch (status) {
+    case "healthy":
+      return { colorPalette: "green", label: "Healthy" };
+    case "warning":
+      return { colorPalette: "yellow", label: "Warning" };
+    case "critical":
+      return { colorPalette: "red", label: "Critical" };
+    default:
+      return { colorPalette: "gray", label: "Unknown" };
+  }
 };
 
 const StatCard = ({
@@ -77,9 +140,11 @@ const StatCard = ({
 const ProviderRow = ({
   index,
   provider,
+  metrics,
 }: {
   readonly index: number;
   readonly provider: ApiProvider;
+  readonly metrics: DummyProviderMetrics;
 }) => (
   <Table.Row>
     <Table.Cell>{index + 1}</Table.Cell>
@@ -94,12 +159,17 @@ const ProviderRow = ({
       </Text>
     </Table.Cell>
     <Table.Cell>
-      <Badge borderRadius="full" colorPalette="gray" px={3} py={1} variant="subtle">
-        —
-      </Badge>
+      {(() => {
+        const { colorPalette, label } = getHealthBadgeProps(metrics.healthStatus);
+        return (
+          <Badge borderRadius="full" colorPalette={colorPalette} px={3} py={1} variant="subtle">
+            {label}
+          </Badge>
+        );
+      })()}
     </Table.Cell>
-    <Table.Cell>—</Table.Cell>
-    <Table.Cell>—</Table.Cell>
+    <Table.Cell>{metrics.openIssues}</Table.Cell>
+    <Table.Cell>{metrics.prVolume}</Table.Cell>
     <Table.Cell>
       <Box as="button" color="fg.info" fontSize="sm">
         View
@@ -111,6 +181,7 @@ const ProviderRow = ({
 const ProviderGovernance = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [providersList, setProvidersList] = useState<Array<ApiProvider>>([]);
+  const [providerSummaries, setProviderSummaries] = useState<Record<number, ApiProviderSummaryRow>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formName, setFormName] = useState("");
@@ -129,15 +200,34 @@ const ProviderGovernance = () => {
     setProvidersList(data);
   }, []);
 
+  const loadProviderSummaries = useCallback(async () => {
+    const origin = window.location.origin;
+    const res = await fetch(`${origin}${getRedirectPath("ui/provider-governance/providers/summary")}`);
+    if (!res.ok) {
+      throw new Error("Failed to load provider summary");
+    }
+    const rows = (await res.json()) as Array<ApiProviderSummaryRow>;
+    const map: Record<number, ApiProviderSummaryRow> = {};
+    for (const row of rows) {
+      map[row.provider_id] = row;
+    }
+    setProviderSummaries(map);
+  }, []);
+
   useEffect(() => {
-    void loadProviders().catch(() => {
-      toaster.create({
-        title: "Could not load providers",
-        description: "Check that the API is available.",
-        type: "error",
-      });
-    });
-  }, [loadProviders]);
+    void (async () => {
+      try {
+        await loadProviders();
+        await loadProviderSummaries();
+      } catch {
+        toaster.create({
+          title: "Could not load providers",
+          description: "Check that the API is available.",
+          type: "error",
+        });
+      }
+    })();
+  }, [loadProviderSummaries, loadProviders]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -175,6 +265,7 @@ const ProviderGovernance = () => {
         }
       }
       await loadProviders();
+      await loadProviderSummaries();
       toaster.create({
         title: "Refresh complete",
         description: `Synced issues and PRs for ${list.length} provider(s).`,
@@ -189,7 +280,7 @@ const ProviderGovernance = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadProviders]);
+  }, [loadProviderSummaries, loadProviders]);
 
   const handleAddProvider = async () => {
     const name = formName.trim();
@@ -232,6 +323,7 @@ const ProviderGovernance = () => {
       setFormActive(true);
       setFormStewardEmail("bg487@cornell.edu");
       await loadProviders();
+      await loadProviderSummaries();
     } catch (err) {
       toaster.create({
         title: "Could not add provider",
@@ -243,9 +335,64 @@ const ProviderGovernance = () => {
     }
   };
 
+  const providersWithMetrics = useMemo<Array<ProviderWithMetrics>>(() => {
+    return providersList.map((p) => {
+      const base = getDummyMetrics(p);
+      const summaryRow = providerSummaries[p.id];
+      return {
+        ...p,
+        metrics: {
+          ...base,
+          avgResolutionHours: summaryRow?.avg_resolution_hours ?? null,
+          commits30d: summaryRow?.commits_30d ?? 0,
+          contributors: summaryRow?.contributors ?? 0,
+          openIssues: summaryRow?.issues_open ?? 0,
+          prMergeRate: summaryRow?.pr_merge_rate ?? 0,
+          prVolume: summaryRow?.prs_total ?? 0,
+        },
+      };
+    });
+  }, [providerSummaries, providersList]);
+
+  const summary = useMemo(() => {
+    if (providersWithMetrics.length === 0) {
+      return {
+        critical: 0,
+        healthy: 0,
+        avgResolutionHours: null as number | null,
+        contributors: 0,
+        totalIssues: 0,
+        warning: 0,
+      };
+    }
+
+    const totalIssues = providersWithMetrics.reduce((acc, p) => acc + p.metrics.openIssues, 0);
+    const contributors = providersWithMetrics.reduce((acc, p) => acc + p.metrics.contributors, 0);
+    const avgResolutionHoursValues = providersWithMetrics
+      .map((p) => p.metrics.avgResolutionHours)
+      .filter((v): v is number => v !== null);
+    const avgResolutionHours =
+      avgResolutionHoursValues.length > 0
+        ? Math.round(
+            avgResolutionHoursValues.reduce((acc, v) => acc + v, 0) /
+              avgResolutionHoursValues.length,
+          )
+        : null;
+
+    const healthy = providersWithMetrics.filter((p) => p.metrics.healthStatus === "healthy").length;
+    const warning = providersWithMetrics.filter((p) => p.metrics.healthStatus === "warning").length;
+    const critical = providersWithMetrics.filter((p) => p.metrics.healthStatus === "critical").length;
+
+    return { critical, healthy, avgResolutionHours, contributors, totalIssues, warning };
+  }, [providersWithMetrics]);
+
+  const sortedProviders = useMemo(() => {
+    return [...providersWithMetrics].sort((a, b) => b.metrics.healthScore - a.metrics.healthScore);
+  }, [providersWithMetrics]);
+
   const totalProviders = providersList.length;
-  const topTwo = providersList.slice(0, 2);
-  const atRiskTwo = providersList.length >= 2 ? providersList.slice(-2) : [];
+  const topTwo = sortedProviders.slice(0, 2);
+  const atRiskTwo = sortedProviders.length >= 2 ? sortedProviders.slice(-2) : [];
 
   return (
     <Box overflow="auto" px={{ base: 2, md: 4 }} py={4}>
@@ -343,7 +490,10 @@ const ProviderGovernance = () => {
       <SimpleGrid columns={{ base: 2, md: 4 }} gap={4} mb={6}>
         <StatCard label="Total Providers (in this cycle)" value={totalProviders} />
         <StatCard label="Total Issues" value={summary.totalIssues} />
-        <StatCard label="Avg Resolution" value={`${summary.avgResolutionHours}h`} />
+        <StatCard
+          label="Avg Resolution (days)"
+          value={summary.avgResolutionHours === null ? "—" : `${Math.round(summary.avgResolutionHours / 24)}d`}
+        />
         <StatCard label="Contributors (last 30d)" value={summary.contributors} />
       </SimpleGrid>
 
@@ -381,9 +531,14 @@ const ProviderGovernance = () => {
                       {p.display_name}
                     </Text>
                   </RouterLink>
-                  <Badge borderRadius="full" colorPalette="green" px={3} py={1} variant="subtle">
-                    —
-                  </Badge>
+                  {(() => {
+                    const { colorPalette } = getHealthBadgeProps(p.metrics.healthStatus);
+                    return (
+                      <Badge borderRadius="full" colorPalette={colorPalette} px={3} py={1} variant="subtle">
+                        {p.metrics.healthScore}
+                      </Badge>
+                    );
+                  })()}
                 </HStack>
               ))
             )}
@@ -406,9 +561,14 @@ const ProviderGovernance = () => {
                       {p.display_name}
                     </Text>
                   </RouterLink>
-                  <Badge borderRadius="full" colorPalette="yellow" px={3} py={1} variant="subtle">
-                    —
-                  </Badge>
+                  {(() => {
+                    const { colorPalette } = getHealthBadgeProps(p.metrics.healthStatus);
+                    return (
+                      <Badge borderRadius="full" colorPalette={colorPalette} px={3} py={1} variant="subtle">
+                        {p.metrics.healthScore}
+                      </Badge>
+                    );
+                  })()}
                 </HStack>
               ))
             )}
@@ -447,8 +607,8 @@ const ProviderGovernance = () => {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {providersList.map((provider, index) => (
-                <ProviderRow index={index} key={provider.id} provider={provider} />
+              {providersWithMetrics.map((provider, index) => (
+                <ProviderRow index={index} key={provider.id} provider={provider} metrics={provider.metrics} />
               ))}
             </Table.Body>
           </Table.Root>
@@ -476,13 +636,13 @@ const ProviderGovernance = () => {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {providersList.map((p) => (
+              {providersWithMetrics.map((p) => (
                 <Table.Row key={p.id}>
                   <Table.Cell>{p.display_name}</Table.Cell>
-                  <Table.Cell>—</Table.Cell>
-                  <Table.Cell>—</Table.Cell>
-                  <Table.Cell>—</Table.Cell>
-                  <Table.Cell>—</Table.Cell>
+                  <Table.Cell>{p.metrics.healthScore}</Table.Cell>
+                  <Table.Cell>{p.metrics.openIssues}</Table.Cell>
+                  <Table.Cell>{p.metrics.prMergeRate}%</Table.Cell>
+                  <Table.Cell>{p.metrics.commits30d}</Table.Cell>
                   <Table.Cell>—</Table.Cell>
                 </Table.Row>
               ))}
