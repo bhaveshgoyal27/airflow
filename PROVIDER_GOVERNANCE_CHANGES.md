@@ -156,3 +156,52 @@ airflow db upgrade
 ## 12. Refresh metrics (issues + PRs)
 
 - **UI “Refresh metrics”** calls, for each provider: `POST .../sync/{id}` then `POST .../sync-pr/{id}`.
+
+---
+
+## 13. UI – Refresh Metrics Workflow
+
+- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
+- **Changes:**
+  - Added a **Refresh metrics** action on the Provider Governance overview.
+  - Refresh now calls `GET /ui/provider-governance/providers` first, then triggers `POST /ui/provider-governance/sync/{provider_id}` for each provider.
+  - Added toast/status feedback for refresh success and failure.
+
+---
+
+## 14. Backend API – Provider List and Sync
+
+- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
+- **Changes:**
+  - Added `GET /ui/provider-governance/providers` to return provider IDs/names used by the UI refresh flow.
+  - Added `POST /ui/provider-governance/sync/{provider_id}` to trigger per-provider issue sync from GitHub into the DB.
+  - Routes are wired under the existing UI router and consumed by the frontend refresh action.
+
+---
+
+## 15. Backend Logic – GitHub Fetching, Label Filtering, and Fallbacks
+
+- **File:** `airflow-core/src/airflow/provider_governance/github_metrics.py`
+- **Changes:**
+  - Implemented provider-scoped GitHub issue sync logic.
+  - Added insert/update behavior for `provider_metrics`:
+    - Insert new issues not already present.
+    - Leave existing issues unchanged.
+    - Close stale OPEN rows when issues are no longer returned as open.
+  - Added provider label matching/filtering (`provider:<name>` with fallback `area:providers:<name>`).
+  - Added fallback/placeholder behavior when provider-labeled issues are not available.
+  - Added token-aware GitHub API handling via `GITHUB_TOKEN` / `AIRFLOW_PROVIDER_GOVERNANCE_GITHUB_TOKEN`.
+
+---
+
+## 16. Core DB – Models and Migrations for Provider Governance
+
+- **Files:**
+  - `airflow-core/src/airflow/models/provider_governance.py`
+  - `airflow-core/src/airflow/migrations/versions/0105_3_2_0_add_provider_governance_tables.py`
+  - `airflow-core/src/airflow/migrations/versions/0106_3_2_0_add_provider_metric_snapshots.py`
+  - `airflow-core/src/airflow/migrations/versions/0107_3_2_0_seed_provider_governance_providers.py`
+- **Changes:**
+  - Added/updated Provider Governance ORM models and schema migrations.
+  - Added migration coverage for provider governance table setup and revision-chain compatibility.
+  - Seed migration ensures default providers exist after DB init/upgrade (`google`, `amazon`, `snowflake`, `microsoft-azure`).
