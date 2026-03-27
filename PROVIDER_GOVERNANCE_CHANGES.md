@@ -159,52 +159,49 @@ airflow db upgrade
 
 ---
 
-## 13. Backend ↔ Frontend integration for DB-backed metrics
+## 13. UI – Refresh Metrics Workflow
 
-This sprint integrates the previously static Provider Governance dashboards with persisted metrics in the database.
-
-### New/updated backend endpoints
-- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
-- **Added:**
-  - `GET /ui/provider-governance/providers/summary`
-    - Returns per-provider aggregate counts derived from `provider_metrics` and `provider_metrics_pr`.
-    - Used by the overview page to display runtime values (Open Issues, PR Volume, PR Merge Rate, Avg Resolution, etc.).
-  - `GET /ui/provider-governance/providers/{provider_id}/detail`
-    - Returns a single provider payload including provider metadata, aggregated counts, and issue/PR row lists.
-    - Used by the provider detail page to render cards, charts, and the issues table from DB data.
-
-### Overview page now reads DB aggregates
 - **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
 - **Changes:**
-  - Loads provider registry from `GET /ui/provider-governance/providers`.
-  - Loads per-provider aggregates from `GET /ui/provider-governance/providers/summary`.
-  - Clicking **Refresh metrics** triggers GitHub sync and then re-fetches provider summary so numbers update.
-  - **Health score/status remains dummy** (frontend deterministic function) until scoring logic is implemented.
-
-### Detail page now reads DB rows
-- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.tsx`
-- **Changes:**
-  - Fetches `GET /ui/provider-governance/providers/{provider_id}/detail` and renders:
-    - Provider-level cards (issues, PRs, avg resolution, contributors/commits if populated)
-    - Bar chart using DB-derived counts
-    - Issues table using DB-synced issue rows
+  - Added a **Refresh metrics** action on the Provider Governance overview.
+  - Refresh now calls `GET /ui/provider-governance/providers` first, then triggers `POST /ui/provider-governance/sync/{provider_id}` for each provider.
+  - Added toast/status feedback for refresh success and failure.
 
 ---
 
-## 14. Metric formulas (current implementation)
+## 14. Backend API – Provider List and Sync
 
-These formulas describe how the overview and detail pages compute and display metrics from DB tables.
+- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
+- **Changes:**
+  - Added `GET /ui/provider-governance/providers` to return provider IDs/names used by the UI refresh flow.
+  - Added `POST /ui/provider-governance/sync/{provider_id}` to trigger per-provider issue sync from GitHub into the DB.
+  - Routes are wired under the existing UI router and consumed by the frontend refresh action.
 
-| Metric | Source | Formula / Notes |
-|---|---|---|
-| Total Providers (in this cycle) | `providers` | Count of rows returned by `GET /ui/provider-governance/providers`. |
-| Open Issues (per provider) | `provider_metrics` | \( \#(\text{rows where } provider\_id=p \land status='OPEN') \). |
-| Total Issues (top card) | `provider_metrics` | Sum of **Open Issues** across all providers. |
-| PR Volume (per provider) | `provider_metrics_pr` | \( \#(\text{all PR rows where } provider\_id=p) \). (Open + closed) |
-| PR Merge Rate (per provider) | `provider_metrics_pr` | \( (\text{prs\_closed} / \text{prs\_total}) \times 100 \) where `prs_closed = #(status='CLOSED')`. Note: this currently treats CLOSED as “merged/closed” (no separate merged flag). |
-| Avg Resolution (per provider) | `provider_metrics` | Average of \( (\text{date\_close}-\text{date\_open}) \times 24 \) hours across rows where `status='CLOSED'` and `date_close IS NOT NULL`. |
-| Avg Resolution (top card) | `provider_metrics` | Average of per-provider averages (ignoring providers with no closed rows). Displayed in **days** in the UI via \( \text{round(hours}/24) \). |
-| Contributors (last 30d) | `provider_metrics` + `provider_metrics_pr` | Sum of `contributor_count` across all issue + PR rows per provider; top card sums across providers. (Currently depends on sync populating `contributor_count`.) |
-| Commits (30d) | `provider_metrics` + `provider_metrics_pr` | Sum of `commit_count` across all issue + PR rows per provider. (Currently depends on sync populating `commit_count`.) |
-| Releases (365d) | — | Not implemented yet (shown as `—`). |
-| Health score / health status | UI (dummy) | Deterministic dummy function from provider `id` and `name.length`; used for status badges and sorting until backend scoring is implemented. |
+---
+
+## 15. Backend Logic – GitHub Fetching, Label Filtering, and Fallbacks
+
+- **File:** `airflow-core/src/airflow/provider_governance/github_metrics.py`
+- **Changes:**
+  - Implemented provider-scoped GitHub issue sync logic.
+  - Added insert/update behavior for `provider_metrics`:
+    - Insert new issues not already present.
+    - Leave existing issues unchanged.
+    - Close stale OPEN rows when issues are no longer returned as open.
+  - Added provider label matching/filtering (`provider:<name>` with fallback `area:providers:<name>`).
+  - Added fallback/placeholder behavior when provider-labeled issues are not available.
+  - Added token-aware GitHub API handling via `GITHUB_TOKEN` / `AIRFLOW_PROVIDER_GOVERNANCE_GITHUB_TOKEN`.
+
+---
+
+## 16. Core DB – Models and Migrations for Provider Governance
+
+- **Files:**
+  - `airflow-core/src/airflow/models/provider_governance.py`
+  - `airflow-core/src/airflow/migrations/versions/0105_3_2_0_add_provider_governance_tables.py`
+  - `airflow-core/src/airflow/migrations/versions/0106_3_2_0_add_provider_metric_snapshots.py`
+  - `airflow-core/src/airflow/migrations/versions/0107_3_2_0_seed_provider_governance_providers.py`
+- **Changes:**
+  - Added/updated Provider Governance ORM models and schema migrations.
+  - Added migration coverage for provider governance table setup and revision-chain compatibility.
+  - Seed migration ensures default providers exist after DB init/upgrade (`google`, `amazon`, `snowflake`, `microsoft-azure`).
