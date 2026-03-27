@@ -156,3 +156,55 @@ airflow db upgrade
 ## 12. Refresh metrics (issues + PRs)
 
 - **UI “Refresh metrics”** calls, for each provider: `POST .../sync/{id}` then `POST .../sync-pr/{id}`.
+
+---
+
+## 13. Backend ↔ Frontend integration for DB-backed metrics
+
+This sprint integrates the previously static Provider Governance dashboards with persisted metrics in the database.
+
+### New/updated backend endpoints
+- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
+- **Added:**
+  - `GET /ui/provider-governance/providers/summary`
+    - Returns per-provider aggregate counts derived from `provider_metrics` and `provider_metrics_pr`.
+    - Used by the overview page to display runtime values (Open Issues, PR Volume, PR Merge Rate, Avg Resolution, etc.).
+  - `GET /ui/provider-governance/providers/{provider_id}/detail`
+    - Returns a single provider payload including provider metadata, aggregated counts, and issue/PR row lists.
+    - Used by the provider detail page to render cards, charts, and the issues table from DB data.
+
+### Overview page now reads DB aggregates
+- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
+- **Changes:**
+  - Loads provider registry from `GET /ui/provider-governance/providers`.
+  - Loads per-provider aggregates from `GET /ui/provider-governance/providers/summary`.
+  - Clicking **Refresh metrics** triggers GitHub sync and then re-fetches provider summary so numbers update.
+  - **Health score/status remains dummy** (frontend deterministic function) until scoring logic is implemented.
+
+### Detail page now reads DB rows
+- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.tsx`
+- **Changes:**
+  - Fetches `GET /ui/provider-governance/providers/{provider_id}/detail` and renders:
+    - Provider-level cards (issues, PRs, avg resolution, contributors/commits if populated)
+    - Bar chart using DB-derived counts
+    - Issues table using DB-synced issue rows
+
+---
+
+## 14. Metric formulas (current implementation)
+
+These formulas describe how the overview and detail pages compute and display metrics from DB tables.
+
+| Metric | Source | Formula / Notes |
+|---|---|---|
+| Total Providers (in this cycle) | `providers` | Count of rows returned by `GET /ui/provider-governance/providers`. |
+| Open Issues (per provider) | `provider_metrics` | \( \#(\text{rows where } provider\_id=p \land status='OPEN') \). |
+| Total Issues (top card) | `provider_metrics` | Sum of **Open Issues** across all providers. |
+| PR Volume (per provider) | `provider_metrics_pr` | \( \#(\text{all PR rows where } provider\_id=p) \). (Open + closed) |
+| PR Merge Rate (per provider) | `provider_metrics_pr` | \( (\text{prs\_closed} / \text{prs\_total}) \times 100 \) where `prs_closed = #(status='CLOSED')`. Note: this currently treats CLOSED as “merged/closed” (no separate merged flag). |
+| Avg Resolution (per provider) | `provider_metrics` | Average of \( (\text{date\_close}-\text{date\_open}) \times 24 \) hours across rows where `status='CLOSED'` and `date_close IS NOT NULL`. |
+| Avg Resolution (top card) | `provider_metrics` | Average of per-provider averages (ignoring providers with no closed rows). Displayed in **days** in the UI via \( \text{round(hours}/24) \). |
+| Contributors (last 30d) | `provider_metrics` + `provider_metrics_pr` | Sum of `contributor_count` across all issue + PR rows per provider; top card sums across providers. (Currently depends on sync populating `contributor_count`.) |
+| Commits (30d) | `provider_metrics` + `provider_metrics_pr` | Sum of `commit_count` across all issue + PR rows per provider. (Currently depends on sync populating `commit_count`.) |
+| Releases (365d) | — | Not implemented yet (shown as `—`). |
+| Health score / health status | UI (dummy) | Deterministic dummy function from provider `id` and `name.length`; used for status badges and sorting until backend scoring is implemented. |
