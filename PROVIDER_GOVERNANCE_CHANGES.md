@@ -30,7 +30,7 @@ This document summarizes all changes made to add the **Provider Governance** fea
 
 - **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
 - **Behavior:**
-  - **Header:** “Provider Health Overview” with subtitle and “Last updated” text; cycle and tag dropdowns (using **NativeSelect** for compatibility).
+  - **Header:** "Provider Health Overview" with subtitle and "Last updated" text; cycle and tag dropdowns (using **NativeSelect** for compatibility).
   - **Summary cards:** Total Providers, Total Issues, Avg Resolution, Contributors (static values for now).
   - **Health Summary:** Badges for Healthy / Warning / Critical counts.
   - **Top Best Providers:** Google Cloud Platform (score 91), Amazon Web Services (score 87). **Provider names are clickable** and go to `/provider-governance/1` and `/provider-governance/2`.
@@ -38,7 +38,7 @@ This document summarizes all changes made to add the **Provider Governance** fea
   - **All Providers table:** Columns #, Provider, Health, Open Issues, PR Volume, Actions. Provider name in each row is a **link** to `/provider-governance/<id>` using a dummy id map (GCP→1, AWS→2, Snowflake→3, Azure→4).
   - **Provider Snapshot Comparison table:** Provider, Score, Open Issues, PR Merge Rate, Commits (30d), Releases (365d) with static rows.
 - **Technical notes:**
-  - Uses Chakra UI components and **NativeSelect** instead of Chakra `Select` to avoid “element type invalid” / white screen issues.
+  - Uses Chakra UI components and **NativeSelect** instead of Chakra `Select` to avoid "element type invalid" / white screen issues.
   - Uses `Table.Root`, `Table.Header`, `Table.Body`, `Table.Row`, `Table.Cell`, `Table.ColumnHeader` (Chakra v3 table API).
   - Default export for the page component to satisfy the router.
 
@@ -48,16 +48,16 @@ This document summarizes all changes made to add the **Provider Governance** fea
 
 - **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.tsx`
 - **Behavior:**
-  - **Breadcrumb:** “Provider Governance” (link back to overview) / provider name.
-  - **Header:** Provider icon, name, tag badge (e.g. `area:providers:snowflake`), status badge (e.g. Warning), “Last release” date; **Email Steward** and **Download Report** buttons (non-functional placeholders).
-  - **Stat cards:** Health Score, Total Issues (open/closed), Avg Resolution, PR Volume (merged/open), Contributors (with “14 commits (30d)” sublabel).
+  - **Breadcrumb:** "Provider Governance" (link back to overview) / provider name.
+  - **Header:** Provider icon, name, tag badge (e.g. `area:providers:snowflake`), status badge (e.g. Warning), "Last release" date; **Email Steward** and **Download Report** buttons (non-functional placeholders).
+  - **Stat cards:** Health Score, Total Issues (open/closed), Avg Resolution, PR Volume (merged/open), Contributors (with "14 commits (30d)" sublabel).
   - **Issue & PR Volume:** Simple bar-style layout (no Chart.js) for Issues (Open/Closed) and PRs (Open/Merged).
   - **Issues table:** ID (link), Title, Created, Resolved, Status, Days Active with static sample rows (#3501, #3287, #3256).
 - **Data:**
   - Reads `providerId` from the URL (`/provider-governance/:providerId`).
   - For now **all ids render the same static Snowflake-style content** (single `SNOWFLAKE_DETAIL` object). The id is reserved for future backend use.
 - **Technical notes:**
-  - Flattened static data fields (e.g. `totalIssuesTotal`, `totalIssuesOpen`, `prVolumeMerged`) to avoid “Cannot read properties of undefined (reading 'total')” when rendering.
+  - Flattened static data fields (e.g. `totalIssuesTotal`, `totalIssuesOpen`, `prVolumeMerged`) to avoid "Cannot read properties of undefined (reading 'total')" when rendering.
 
 ---
 
@@ -141,7 +141,7 @@ airflow db upgrade
 ## 10. Create provider (API + UI)
 
 - **API:** `POST /ui/provider-governance/providers` with JSON body: `name`, `display_name`, `lifecycle`, `is_active`, `steward_email`. Returns the created row; `409` if `name` already exists.
-- **UI:** “Add provider” opens a dialog; saves via the API. Overview loads providers from `GET /ui/provider-governance/providers` (no hardcoded four providers).
+- **UI:** "Add provider" opens a dialog; saves via the API. Overview loads providers from `GET /ui/provider-governance/providers` (no hardcoded four providers).
 
 ---
 
@@ -155,4 +155,167 @@ airflow db upgrade
 
 ## 12. Refresh metrics (issues + PRs)
 
-- **UI “Refresh metrics”** calls, for each provider: `POST .../sync/{id}` then `POST .../sync-pr/{id}`.
+- **UI "Refresh metrics"** calls, for each provider: `POST .../sync/{id}` then `POST .../sync-pr/{id}`.
+
+---
+
+## 13. Backend ↔ Frontend integration for DB-backed metrics
+
+This sprint integrates the previously static Provider Governance dashboards with persisted metrics in the database.
+
+### New/updated backend endpoints
+- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
+- **Added:**
+  - `GET /ui/provider-governance/providers/summary`
+    - Returns per-provider aggregate counts derived from `provider_metrics` and `provider_metrics_pr`.
+    - Used by the overview page to display runtime values (Open Issues, PR Volume, PR Merge Rate, Avg Resolution, etc.).
+  - `GET /ui/provider-governance/providers/{provider_id}/detail`
+    - Returns a single provider payload including provider metadata, aggregated counts, and issue/PR row lists.
+    - Used by the provider detail page to render cards, charts, and the issues table from DB data.
+
+### Overview page now reads DB aggregates
+- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
+- **Changes:**
+  - Loads provider registry from `GET /ui/provider-governance/providers`.
+  - Loads per-provider aggregates from `GET /ui/provider-governance/providers/summary`.
+  - Clicking **Refresh metrics** triggers GitHub sync and then re-fetches provider summary so numbers update.
+  - **Health score/status remains dummy** (frontend deterministic function) until scoring logic is implemented.
+
+### Detail page now reads DB rows
+- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.tsx`
+- **Changes:**
+  - Fetches `GET /ui/provider-governance/providers/{provider_id}/detail` and renders:
+    - Provider-level cards (issues, PRs, avg resolution)
+    - Bar chart using DB-derived counts
+    - Issues table using DB-synced issue rows
+
+---
+
+## 14. Sprint 2 – UI: Refresh Metrics Workflow
+
+- **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
+- **Changes:**
+  - Added a **Refresh metrics** action button on the Provider Governance overview page.
+  - Refresh flow first calls `GET /ui/provider-governance/providers` to retrieve the current provider list, then fires `POST /ui/provider-governance/sync/{provider_id}` for each provider sequentially.
+  - Added toast/status feedback: success toast on completion (with count of synced providers), error toast on any sync failure with the error detail surfaced from the API response.
+
+---
+
+## 15. Sprint 2 – Backend API: Provider List and Sync
+
+- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
+- **Changes:**
+  - Added `GET /ui/provider-governance/providers` — returns all provider rows (id, name, display_name, lifecycle, is_active, steward_email) used by the UI refresh flow and overview page.
+  - Added `POST /ui/provider-governance/sync/{provider_id}` — triggers per-provider issue sync from GitHub into the `provider_metrics` DB table; returns `{ added, updated, unchanged }` counts.
+  - Both routes are wired under the existing `provider_governance_router` and consumed by the frontend refresh action.
+
+---
+
+## 16. Sprint 2 – Backend Logic: GitHub Fetching, Label Filtering, and Fallbacks
+
+- **File:** `airflow-core/src/airflow/provider_governance/github_metrics.py`
+- **Changes:**
+  - Implemented `sync_provider_issues_from_github` — provider-scoped GitHub issue sync logic with the following insert/update semantics:
+    - **Insert** new issues not already present in `provider_metrics`.
+    - **Leave unchanged** existing issue rows that are still open.
+    - **Close stale rows** — marks `OPEN` rows as `CLOSED` (with `date_close`) when they are no longer returned by GitHub's open-issues endpoint.
+  - Added provider label matching/filtering: looks for `provider:<name>` label first, falls back to `area:providers:<name>`.
+  - Added fallback/placeholder behavior when no provider-labeled issues are available.
+  - Added token-aware GitHub API handling via `GITHUB_TOKEN` / `AIRFLOW_PROVIDER_GOVERNANCE_GITHUB_TOKEN` environment variables (5000 req/hr authenticated vs 60/hr unauthenticated).
+
+---
+
+## 17. Sprint 2 – Core DB: Models and Migrations for Provider Governance
+
+- **Files:**
+  - `airflow-core/src/airflow/models/provider_governance.py`
+  - `airflow-core/src/airflow/migrations/versions/0105_3_2_0_add_provider_governance_tables.py`
+  - `airflow-core/src/airflow/migrations/versions/0106_3_2_0_add_provider_metric_snapshots.py`
+  - `airflow-core/src/airflow/migrations/versions/0107_3_2_0_seed_provider_governance_providers.py`
+- **Changes:**
+  - Added/updated Provider Governance ORM models (`Provider`, `ProviderMetric`) and corresponding Alembic schema migrations.
+  - Added migration coverage for provider governance table setup and revision-chain compatibility across the `0105` → `0106` → `0107` chain.
+  - Seed migration (`0107`) ensures default providers exist after DB init/upgrade (`google`, `amazon`, `snowflake`, `microsoft-azure`). Note: this seed was later made a no-op in migration `0109` (see §11).
+
+---
+
+## 18. Metric formulas (current implementation)
+
+These formulas describe how the overview and detail pages compute and display metrics from DB tables.
+
+| Metric | Source | Formula / Notes |
+|---|---|---|
+| Total Providers (in this cycle) | `providers` | Count of rows returned by `GET /ui/provider-governance/providers`. |
+| Open Issues (per provider) | `provider_metrics` | \( \#(\text{rows where } provider\_id=p \land status='OPEN') \). |
+| Total Issues (top card) | `provider_metrics` | Sum of **Open Issues** across all providers. |
+| PR Volume (per provider) | `provider_metrics_pr` | \( \#(\text{all PR rows where } provider\_id=p) \). (Open + closed) |
+| PR Merge Rate (per provider) | `provider_metrics_pr` | \( (\text{prs\_closed} / \text{prs\_total}) \times 100 \) where `prs_closed = #(status='CLOSED')`. Note: this currently treats CLOSED as "merged/closed" (no separate merged flag). |
+| Avg Resolution (per provider) | `provider_metrics` | Average of \( (\text{date\_close}-\text{date\_open}) \times 24 \) hours across rows where `status='CLOSED'` and `date_close IS NOT NULL`. |
+| Avg Resolution (top card) | `provider_metrics` | Average of per-provider averages (ignoring providers with no closed rows). Displayed in **days** in the UI via \( \text{round(hours}/24) \). |
+| Health score / health status | UI (dummy) | Deterministic dummy function from provider `id` and `name.length`; used for status badges and sorting until backend scoring is implemented. |
+
+---
+
+## 19. Sprint 3 – Page 1 UI clean-up
+
+### File: `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.tsx`
+
+**Actions column removed**
+- Dropped the "Actions / View" column from the All Providers table (`<Table.ColumnHeader>` and `<Table.Cell>` in `ProviderRow`). Provider names are already clickable links, making the redundant button unnecessary.
+
+**Search wired to state**
+- Added `searchQuery` state. The existing search `<Input>` is now fully controlled (`value` + `onChange`).
+- `displayedProviders` memo filters `providersWithMetrics` against `searchQuery`, matching `display_name`, `name`, and `lifecycle` (case-insensitive substring).
+
+**Sort dropdown — real options + effect on main table**
+- Added `sortBy` state (`"health_score" | "open_issues" | "name"`, default `"health_score"`).
+- Sort `<NativeSelect>` now has three labeled options: **Health Score**, **Open Issues**, **Name (A–Z)**.
+- `displayedProviders` applies the selected comparator before rendering the table so the main table is always in sync with the control (previously the table used the raw unsorted `providersWithMetrics`).
+
+**"Last updated" — real timestamp**
+- Replaced the static string `"Last updated Jan 21, 2025"` with a `lastRefreshed: Date | null` state value.
+- The timestamp is set to `new Date()` after the initial page load completes and after every successful **Refresh metrics** sync.
+- The line is hidden entirely (`null`) until the first successful load, avoiding stale/misleading text.
+
+**Snapshot / table gaps resolved**
+- **Releases (365d)**: column removed from the Provider Snapshot Comparison table (no data source available).
+- **Commits (30d)**: column removed from the snapshot table; `commits30d` field removed from `DummyProviderMetrics` type and `getDummyMetrics` return value.
+- **Contributors (last 30d)**: stat card removed from the top summary grid; `contributors` field removed from `DummyProviderMetrics` and the `summary` computed object. Summary grid changed from 4 columns to 3.
+
+---
+
+## 20. Sprint 3 – Page 2 (Provider Detail) clean-up
+
+### File: `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.tsx`
+
+**PR table added**
+- A full "Pull Requests" table is now rendered below the Issues table.
+- Pulls from `data.prs` (already returned by `GET …/providers/{id}/detail`).
+- Columns: PR (link `#number → url`), Title, Opened, Closed, Status badge (Open = orange, Merged = purple), Days Active.
+- Open PRs use today as the end date for Days Active (same logic as issues).
+
+**Email Steward → real `mailto:` link**
+- Replaced the inert `<Box as="button">` placeholder with a `<Link href="mailto:…">`.
+- Uses `provider.steward_email` from the API response — no SMTP or backend change needed.
+- The link is only set when `steward_email` is non-empty; otherwise `href` stays `undefined`.
+
+**Days Active — open issues now use today as end date**
+- Previously: `endDate = resolved ?? created` → OPEN issues always showed `0d`.
+- Fixed: `endDate = status === "OPEN" ? new Date() : new Date(resolved)`.
+- Extracted into a shared `calcDaysActive(created, resolved, status)` helper used by both the Issues and PR tables.
+
+**Issues search + status filter wired**
+- Added `issueSearch` (string) and `statusFilter` (`"ALL" | "OPEN" | "CLOSED"`) state.
+- Search `<Input>` is now controlled (`value` / `onChange`), filtering by issue title (case-insensitive substring).
+- "All Status" `<Box as="button">` replaced with a `<NativeSelect>` (All Status / Open / Closed).
+- Issue count in the heading reflects the filtered length, not the total.
+- Empty-filter state shows "No issues match the current filter." instead of an empty table.
+
+**Provider icon → initials avatar**
+- Replaced hardcoded `❄️` emoji with a circular avatar showing 1–2 uppercase initials derived from `provider.display_name` (e.g. "Google Cloud Platform" → "GC").
+- Background color is deterministic from `provider.name` (HSL hash), so each provider consistently gets a unique color with no network dependency.
+
+**Contributors & Commits removed from scope**
+- Removed the "Contributors" stat card (was showing `0` with `"0 commits (30d)"` sublabel).
+- Removed the `totalContributors` and `commits30d` variable declarations.
+- Stat grid adjusted from 5 → 4 columns (Health Score, Total Issues, Avg Resolution, PR Volume).

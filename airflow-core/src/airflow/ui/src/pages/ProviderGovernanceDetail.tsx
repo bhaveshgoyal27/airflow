@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Badge, Box, Flex, Heading, HStack, Input, Link, SimpleGrid, Table, Text } from "@chakra-ui/react";
+import { Badge, Box, Flex, Heading, HStack, Input, Link, NativeSelect, SimpleGrid, Table, Text } from "@chakra-ui/react";
 import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { toaster } from "src/components/ui";
@@ -88,6 +88,18 @@ const getStatusBadgeProps = (status: ProviderStatus) => {
   }
 };
 
+const getProviderInitials = (displayName: string): string =>
+  displayName
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+
+const getProviderAvatarBg = (name: string): string => {
+  const hue = (name.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0) * 47) % 360;
+  return `hsl(${hue}, 55%, 45%)`;
+};
+
 const StatCard = ({
   label,
   value,
@@ -135,10 +147,18 @@ const Bar = ({
   </Flex>
 );
 
+const calcDaysActive = (created: string, resolved: string | null, status: "OPEN" | "CLOSED"): number => {
+  const createdDate = new Date(`${created}T00:00:00Z`);
+  const endDate = status === "OPEN" ? new Date() : new Date(`${resolved}T00:00:00Z`);
+  return Math.max(0, Math.round((endDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
+};
+
 const ProviderGovernanceDetail = () => {
   const { providerId } = useParams();
   const [data, setData] = useState<ApiProviderDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [issueSearch, setIssueSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "OPEN" | "CLOSED">("ALL");
 
   useEffect(() => {
     const id = Number(providerId);
@@ -178,6 +198,15 @@ const ProviderGovernanceDetail = () => {
   const issues = data?.issues ?? [];
   const prs = data?.prs ?? [];
 
+  const filteredIssues = useMemo(() => {
+    const q = issueSearch.trim().toLowerCase();
+    return issues.filter((issue) => {
+      const matchesSearch = q ? issue.title.toLowerCase().includes(q) : true;
+      const matchesStatus = statusFilter === "ALL" ? true : issue.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [issues, issueSearch, statusFilter]);
+
   const prVolumeOpen = summary?.prs_open ?? 0;
   const prVolumeMerged = summary?.prs_closed ?? 0;
   const totalIssuesTotal = summary?.issues_total ?? 0;
@@ -191,8 +220,6 @@ const ProviderGovernanceDetail = () => {
 
   const shownName = provider?.display_name ?? "Provider";
   const lastRelease = summary?.last_release ?? "—";
-  const totalContributors = summary?.contributors ?? 0;
-  const commits30d = summary?.commits_30d ?? 0;
 
   return (
     <Box overflow="auto" px={{ base: 2, md: 4 }} py={4}>
@@ -207,13 +234,16 @@ const ProviderGovernanceDetail = () => {
         <HStack alignItems="center" gap={4}>
           <Box
             alignItems="center"
+            bg={getProviderAvatarBg(provider?.name ?? "")}
             borderRadius="full"
-            borderWidth={1}
             boxSize={12}
+            color="white"
             display="flex"
+            fontSize="sm"
+            fontWeight="bold"
             justifyContent="center"
           >
-            <Text fontSize="lg">❄️</Text>
+            {getProviderInitials(provider?.display_name ?? "?")}
           </Box>
           <Box>
             <Heading size="lg">{shownName}</Heading>
@@ -231,17 +261,19 @@ const ProviderGovernanceDetail = () => {
           </Box>
         </HStack>
         <HStack gap={3} mt={{ base: 4, md: 0 }}>
-          <Box
-            as="button"
+          <Link
             borderRadius="lg"
             borderWidth={1}
             color="fg.muted"
             fontSize="sm"
+            href={provider?.steward_email ? `mailto:${provider.steward_email}` : undefined}
             px={4}
             py={2}
+            textDecoration="none"
+            _hover={{ bg: "bg.muted", textDecoration: "none" }}
           >
             Email Steward
-          </Box>
+          </Link>
           <Box
             as="button"
             bg="blue.500"
@@ -256,27 +288,22 @@ const ProviderGovernanceDetail = () => {
         </HStack>
       </Flex>
 
-      <SimpleGrid columns={{ base: 2, md: 5 }} gap={4} mb={6}>
+      <SimpleGrid columns={{ base: 2, md: 4 }} gap={4} mb={6}>
         <StatCard
           label="Health Score"
-          value={isLoading ? "—" : healthScore}
           sublabel={isLoading ? undefined : statusBadge.label}
+          value={isLoading ? "—" : healthScore}
         />
         <StatCard
           label="Total Issues"
-          value={isLoading ? "—" : totalIssuesTotal}
           sublabel={isLoading ? undefined : `${totalIssuesOpen} open \u00b7 ${totalIssuesClosed} closed`}
+          value={isLoading ? "—" : totalIssuesTotal}
         />
         <StatCard label="Avg Resolution (days)" value={isLoading ? "—" : `${avgResolutionDays}d`} />
         <StatCard
           label="PR Volume"
-          value={isLoading ? "—" : prVolumeMerged + prVolumeOpen}
           sublabel={isLoading ? undefined : `${prVolumeMerged} merged \u00b7 ${prVolumeOpen} open`}
-        />
-        <StatCard
-          label="Contributors"
-          value={isLoading ? "—" : totalContributors}
-          sublabel={isLoading ? undefined : `${commits30d} commits (30d)`}
+          value={isLoading ? "—" : prVolumeMerged + prVolumeOpen}
         />
       </SimpleGrid>
 
@@ -284,12 +311,7 @@ const ProviderGovernanceDetail = () => {
         <Text color="fg.muted" fontSize="xs" mb={4} textTransform="uppercase">
           Issue &amp; PR Volume
         </Text>
-        <Flex
-          alignItems="flex-end"
-          gap={8}
-          justifyContent="center"
-          minH="220px"
-        >
+        <Flex alignItems="flex-end" gap={8} justifyContent="center" minH="220px">
           <Flex alignItems="flex-end" gap={4}>
             <Bar color="red.400" height={toHeight(totalIssuesOpen)} label="Issues (Open)" />
             <Bar color="green.400" height={toHeight(totalIssuesClosed)} label="Issues (Closed)" />
@@ -301,21 +323,28 @@ const ProviderGovernanceDetail = () => {
         </Flex>
       </Box>
 
-      <Box bg="bg.surface" borderRadius="xl" borderWidth={1} p={4}>
+      {/* Issues table */}
+      <Box bg="bg.surface" borderRadius="xl" borderWidth={1} mb={6} p={4}>
         <Flex alignItems="center" justifyContent="space-between" mb={4}>
-          <Heading size="md">Issues ({totalIssuesTotal})</Heading>
+          <Heading size="md">Issues ({filteredIssues.length})</Heading>
           <HStack gap={3}>
-            <Input placeholder="Search issues..." size="sm" width="260px" />
-            <Box
-              as="button"
-              borderRadius="lg"
-              borderWidth={1}
-              fontSize="sm"
-              px={3}
-              py={1.5}
-            >
-              All Status
-            </Box>
+            <Input
+              onChange={(e) => setIssueSearch(e.target.value)}
+              placeholder="Search issues..."
+              size="sm"
+              value={issueSearch}
+              width="260px"
+            />
+            <NativeSelect.Root size="sm" width="140px">
+              <NativeSelect.Field
+                onChange={(e) => setStatusFilter(e.target.value as "ALL" | "OPEN" | "CLOSED")}
+                value={statusFilter}
+              >
+                <option value="ALL">All Status</option>
+                <option value="OPEN">Open</option>
+                <option value="CLOSED">Closed</option>
+              </NativeSelect.Field>
+            </NativeSelect.Root>
           </HStack>
         </Flex>
         <Table.Root size="sm">
@@ -339,28 +368,94 @@ const ProviderGovernanceDetail = () => {
             ) : issues.length === 0 ? (
               <Table.Row>
                 <Table.Cell colSpan={6}>
-                  <Text color="fg.muted">No issues synced yet. Click “Refresh metrics” on the overview page.</Text>
+                  <Text color="fg.muted">No issues synced yet. Click "Refresh metrics" on the overview page.</Text>
+                </Table.Cell>
+              </Table.Row>
+            ) : filteredIssues.length === 0 ? (
+              <Table.Row>
+                <Table.Cell colSpan={6}>
+                  <Text color="fg.muted">No issues match the current filter.</Text>
                 </Table.Cell>
               </Table.Row>
             ) : (
-              issues.slice(0, 200).map((issue) => {
-                const created = issue.created;
-                const resolved = issue.resolved ?? "—";
-                const badge = issue.status === "OPEN" ? { colorPalette: "orange", label: "Open" } : { colorPalette: "green", label: "Closed" };
-                const createdDate = new Date(`${issue.created}T00:00:00Z`);
-                const endDate = new Date(`${(issue.resolved ?? issue.created)}T00:00:00Z`);
-                const daysActive = Math.max(0, Math.round((endDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
+              filteredIssues.slice(0, 200).map((issue) => {
+                const badge =
+                  issue.status === "OPEN"
+                    ? { colorPalette: "orange", label: "Open" }
+                    : { colorPalette: "green", label: "Closed" };
+                const daysActive = calcDaysActive(issue.created, issue.resolved, issue.status);
                 const displayNum = issue.number ? `#${issue.number}` : "—";
                 return (
-                  <Table.Row key={`${issue.url}`}>
+                  <Table.Row key={issue.url}>
                     <Table.Cell>
                       <Link color="fg.info" href={issue.url} target="_blank">
                         {displayNum}
                       </Link>
                     </Table.Cell>
                     <Table.Cell>{issue.title}</Table.Cell>
-                    <Table.Cell>{created}</Table.Cell>
-                    <Table.Cell>{resolved}</Table.Cell>
+                    <Table.Cell>{issue.created}</Table.Cell>
+                    <Table.Cell>{issue.resolved ?? "—"}</Table.Cell>
+                    <Table.Cell>
+                      <Badge borderRadius="full" colorPalette={badge.colorPalette} variant="subtle">
+                        {badge.label}
+                      </Badge>
+                    </Table.Cell>
+                    <Table.Cell isNumeric>{daysActive}d</Table.Cell>
+                  </Table.Row>
+                );
+              })
+            )}
+          </Table.Body>
+        </Table.Root>
+      </Box>
+
+      {/* Pull Requests table */}
+      <Box bg="bg.surface" borderRadius="xl" borderWidth={1} p={4}>
+        <Flex alignItems="center" mb={4}>
+          <Heading size="md">Pull Requests ({prs.length})</Heading>
+        </Flex>
+        <Table.Root size="sm">
+          <Table.Header>
+            <Table.Row>
+              <Table.ColumnHeader>PR</Table.ColumnHeader>
+              <Table.ColumnHeader>Title</Table.ColumnHeader>
+              <Table.ColumnHeader>Opened</Table.ColumnHeader>
+              <Table.ColumnHeader>Closed</Table.ColumnHeader>
+              <Table.ColumnHeader>Status</Table.ColumnHeader>
+              <Table.ColumnHeader isNumeric>Days Active</Table.ColumnHeader>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {isLoading ? (
+              <Table.Row>
+                <Table.Cell colSpan={6}>
+                  <Text color="fg.muted">Loading…</Text>
+                </Table.Cell>
+              </Table.Row>
+            ) : prs.length === 0 ? (
+              <Table.Row>
+                <Table.Cell colSpan={6}>
+                  <Text color="fg.muted">No PRs synced yet. Click "Refresh metrics" on the overview page.</Text>
+                </Table.Cell>
+              </Table.Row>
+            ) : (
+              prs.slice(0, 200).map((pr) => {
+                const badge =
+                  pr.status === "OPEN"
+                    ? { colorPalette: "orange", label: "Open" }
+                    : { colorPalette: "purple", label: "Merged" };
+                const daysActive = calcDaysActive(pr.created, pr.resolved, pr.status);
+                const displayNum = pr.number ? `#${pr.number}` : "—";
+                return (
+                  <Table.Row key={pr.url}>
+                    <Table.Cell>
+                      <Link color="fg.info" href={pr.url} target="_blank">
+                        {displayNum}
+                      </Link>
+                    </Table.Cell>
+                    <Table.Cell>{pr.title}</Table.Cell>
+                    <Table.Cell>{pr.created}</Table.Cell>
+                    <Table.Cell>{pr.resolved ?? "—"}</Table.Cell>
                     <Table.Cell>
                       <Badge borderRadius="full" colorPalette={badge.colorPalette} variant="subtle">
                         {badge.label}
@@ -379,4 +474,3 @@ const ProviderGovernanceDetail = () => {
 };
 
 export default ProviderGovernanceDetail;
-

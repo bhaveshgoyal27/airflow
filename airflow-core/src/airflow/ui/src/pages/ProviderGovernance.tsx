@@ -67,8 +67,6 @@ type DummyProviderMetrics = {
   readonly healthScore: number; // 0-100
   readonly healthStatus: HealthStatus;
   readonly avgResolutionHours: number | null;
-  readonly commits30d: number;
-  readonly contributors: number;
   readonly openIssues: number;
   readonly prMergeRate: number;
   readonly prVolume: number;
@@ -94,8 +92,6 @@ const getDummyMetrics = (provider: ApiProvider): DummyProviderMetrics => {
     healthScore,
     healthStatus,
     avgResolutionHours: null,
-    commits30d: 0,
-    contributors: 0,
     openIssues: 0,
     prMergeRate: 0,
     prVolume: 0,
@@ -170,11 +166,6 @@ const ProviderRow = ({
     </Table.Cell>
     <Table.Cell>{metrics.openIssues}</Table.Cell>
     <Table.Cell>{metrics.prVolume}</Table.Cell>
-    <Table.Cell>
-      <Box as="button" color="fg.info" fontSize="sm">
-        View
-      </Box>
-    </Table.Cell>
   </Table.Row>
 );
 
@@ -189,6 +180,9 @@ const ProviderGovernance = () => {
   const [formLifecycle, setFormLifecycle] = useState("production");
   const [formActive, setFormActive] = useState(true);
   const [formStewardEmail, setFormStewardEmail] = useState("bg487@cornell.edu");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"health_score" | "open_issues" | "name">("health_score");
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   const loadProviders = useCallback(async () => {
     const origin = window.location.origin;
@@ -219,6 +213,7 @@ const ProviderGovernance = () => {
       try {
         await loadProviders();
         await loadProviderSummaries();
+        setLastRefreshed(new Date());
       } catch {
         toaster.create({
           title: "Could not load providers",
@@ -266,6 +261,7 @@ const ProviderGovernance = () => {
       }
       await loadProviders();
       await loadProviderSummaries();
+      setLastRefreshed(new Date());
       toaster.create({
         title: "Refresh complete",
         description: `Synced issues and PRs for ${list.length} provider(s).`,
@@ -344,8 +340,6 @@ const ProviderGovernance = () => {
         metrics: {
           ...base,
           avgResolutionHours: summaryRow?.avg_resolution_hours ?? null,
-          commits30d: summaryRow?.commits_30d ?? 0,
-          contributors: summaryRow?.contributors ?? 0,
           openIssues: summaryRow?.issues_open ?? 0,
           prMergeRate: summaryRow?.pr_merge_rate ?? 0,
           prVolume: summaryRow?.prs_total ?? 0,
@@ -360,14 +354,12 @@ const ProviderGovernance = () => {
         critical: 0,
         healthy: 0,
         avgResolutionHours: null as number | null,
-        contributors: 0,
         totalIssues: 0,
         warning: 0,
       };
     }
 
     const totalIssues = providersWithMetrics.reduce((acc, p) => acc + p.metrics.openIssues, 0);
-    const contributors = providersWithMetrics.reduce((acc, p) => acc + p.metrics.contributors, 0);
     const avgResolutionHoursValues = providersWithMetrics
       .map((p) => p.metrics.avgResolutionHours)
       .filter((v): v is number => v !== null);
@@ -383,12 +375,30 @@ const ProviderGovernance = () => {
     const warning = providersWithMetrics.filter((p) => p.metrics.healthStatus === "warning").length;
     const critical = providersWithMetrics.filter((p) => p.metrics.healthStatus === "critical").length;
 
-    return { critical, healthy, avgResolutionHours, contributors, totalIssues, warning };
+    return { critical, healthy, avgResolutionHours, totalIssues, warning };
   }, [providersWithMetrics]);
 
   const sortedProviders = useMemo(() => {
     return [...providersWithMetrics].sort((a, b) => b.metrics.healthScore - a.metrics.healthScore);
   }, [providersWithMetrics]);
+
+  const displayedProviders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = q
+      ? providersWithMetrics.filter(
+          (p) =>
+            p.display_name.toLowerCase().includes(q) ||
+            p.name.toLowerCase().includes(q) ||
+            p.lifecycle.toLowerCase().includes(q),
+        )
+      : providersWithMetrics;
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "open_issues") return b.metrics.openIssues - a.metrics.openIssues;
+      if (sortBy === "name") return a.display_name.localeCompare(b.display_name);
+      return b.metrics.healthScore - a.metrics.healthScore;
+    });
+  }, [providersWithMetrics, searchQuery, sortBy]);
 
   const totalProviders = providersList.length;
   const topTwo = sortedProviders.slice(0, 2);
@@ -402,9 +412,11 @@ const ProviderGovernance = () => {
           <Text color="fg.muted" fontSize="sm" mt={1}>
             Governance dashboard for Apache Airflow providers
           </Text>
-          <Text color="fg.muted" fontSize="xs" mt={1}>
-            Last updated Jan 21, 2025
-          </Text>
+          {lastRefreshed !== null && (
+            <Text color="fg.muted" fontSize="xs" mt={1}>
+              Last updated {lastRefreshed.toLocaleString()}
+            </Text>
+          )}
         </Box>
         <HStack gap={3} flexWrap="wrap" justifyContent="flex-end">
           <Button onClick={() => setAddOpen(true)} size="sm" variant="solid">
@@ -487,14 +499,13 @@ const ProviderGovernance = () => {
         </Dialog.Content>
       </Dialog.Root>
 
-      <SimpleGrid columns={{ base: 2, md: 4 }} gap={4} mb={6}>
+      <SimpleGrid columns={{ base: 1, md: 3 }} gap={4} mb={6}>
         <StatCard label="Total Providers (in this cycle)" value={totalProviders} />
         <StatCard label="Total Issues" value={summary.totalIssues} />
         <StatCard
           label="Avg Resolution (days)"
           value={summary.avgResolutionHours === null ? "—" : `${Math.round(summary.avgResolutionHours / 24)}d`}
         />
-        <StatCard label="Contributors (last 30d)" value={summary.contributors} />
       </SimpleGrid>
 
       <SimpleGrid columns={{ base: 1, md: 3 }} gap={4} mb={6}>
@@ -581,10 +592,21 @@ const ProviderGovernance = () => {
           <Heading size="md">All Providers</Heading>
           <Spacer />
           <HStack gap={3}>
-            <Input placeholder="Search providers or tags..." size="sm" width="260px" />
-            <NativeSelect.Root size="sm" width="160px">
-              <NativeSelect.Field>
-                <option>Sort: Health Score</option>
+            <Input
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name or lifecycle..."
+              size="sm"
+              value={searchQuery}
+              width="260px"
+            />
+            <NativeSelect.Root size="sm" width="180px">
+              <NativeSelect.Field
+                onChange={(e) => setSortBy(e.target.value as "health_score" | "open_issues" | "name")}
+                value={sortBy}
+              >
+                <option value="health_score">Sort: Health Score</option>
+                <option value="open_issues">Sort: Open Issues</option>
+                <option value="name">Sort: Name (A–Z)</option>
               </NativeSelect.Field>
             </NativeSelect.Root>
           </HStack>
@@ -603,11 +625,10 @@ const ProviderGovernance = () => {
                 <Table.ColumnHeader>Health</Table.ColumnHeader>
                 <Table.ColumnHeader>Open Issues</Table.ColumnHeader>
                 <Table.ColumnHeader>PR Volume</Table.ColumnHeader>
-                <Table.ColumnHeader>Actions</Table.ColumnHeader>
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {providersWithMetrics.map((provider, index) => (
+              {displayedProviders.map((provider, index) => (
                 <ProviderRow index={index} key={provider.id} provider={provider} metrics={provider.metrics} />
               ))}
             </Table.Body>
@@ -631,8 +652,6 @@ const ProviderGovernance = () => {
                 <Table.ColumnHeader>Score</Table.ColumnHeader>
                 <Table.ColumnHeader>Open Issues</Table.ColumnHeader>
                 <Table.ColumnHeader>PR Merge Rate</Table.ColumnHeader>
-                <Table.ColumnHeader>Commits (30d)</Table.ColumnHeader>
-                <Table.ColumnHeader>Releases (365d)</Table.ColumnHeader>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -642,8 +661,6 @@ const ProviderGovernance = () => {
                   <Table.Cell>{p.metrics.healthScore}</Table.Cell>
                   <Table.Cell>{p.metrics.openIssues}</Table.Cell>
                   <Table.Cell>{p.metrics.prMergeRate}%</Table.Cell>
-                  <Table.Cell>{p.metrics.commits30d}</Table.Cell>
-                  <Table.Cell>—</Table.Cell>
                 </Table.Row>
               ))}
             </Table.Body>
