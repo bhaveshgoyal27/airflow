@@ -182,6 +182,19 @@ def list_providers(session: SessionDep) -> list[dict]:
     ]
 
 
+@provider_governance_router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_provider(provider_id: int, session: SessionDep) -> None:
+    """Delete a provider and cascade-delete related metrics rows."""
+    provider = session.scalar(select(Provider).where(Provider.id == provider_id))
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id={provider_id} not found",
+        )
+    session.delete(provider)
+    session.commit()
+
+
 @provider_governance_router.get("/providers/summary")
 def get_providers_summary(session: SessionDep) -> list[ProviderGovernanceProviderSummaryRow]:
     """

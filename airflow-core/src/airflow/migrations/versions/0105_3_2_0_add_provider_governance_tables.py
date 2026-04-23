@@ -81,6 +81,10 @@ def upgrade():
 
 def downgrade():
   """Drop provider governance tables."""
-  op.drop_table("provider_metrics")
-  op.drop_table("providers")
+  conn = op.get_bind()
+  inspector = sa.inspect(conn)
+  if inspector.has_table("provider_metrics"):
+      op.drop_table("provider_metrics")
+  if inspector.has_table("providers"):
+      op.drop_table("providers")
 
