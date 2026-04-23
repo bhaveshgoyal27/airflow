@@ -329,3 +329,80 @@ These formulas describe how the overview and detail pages compute and display me
   - `airflow-core/src/airflow/provider_governance/health_score.py` — `compute_health_score`: renormalized component weights; `null` score when no component applies; `is_active` penalty.
   - `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py` — summary and detail responses include `health_score`, `health_status`; detail `summary` aligns with list (including `pr_merge_rate`, `contributors`, `commits_30d`).
   - `airflow-core/tests/unit/provider_governance/test_health_score.py` — golden expectations for the scorer.
+
+---
+
+## 22. Sprint 3 hardening and branch-level refinements
+
+This section captures the additional implementation and quality work completed after the initial server-side scoring rollout.
+
+### 22.1 GitHub sync: richer derived metrics and refresh semantics
+
+- **New helper module:** `airflow-core/src/airflow/provider_governance/github_metric_derived.py`
+  - Added pure helpers to derive row-level signals from GitHub payloads:
+    - `contributor_signal_from_github_issue`
+    - `contributor_signal_from_github_pull`
+    - `commit_count_from_github_pull_payload`
+  - Contributor signal is capped (`CONTRIBUTOR_SIGNAL_CAP = 50`) to stay aligned with score scaling.
+
+- **Sync logic updates:** `airflow-core/src/airflow/provider_governance/github_metrics.py`
+  - New and refreshed OPEN rows now populate `contributor_count` (issues + PRs) and `commit_count` (PRs).
+  - Added refresh helpers so existing OPEN rows are updated with latest GitHub title/contributor/commit data instead of only inserting net-new rows.
+  - Close-stale paths now also carry final contributor/commit values when marking rows CLOSED.
+  - Link normalization/mapping helpers were added to improve matching reliability when syncing existing DB rows.
+
+### 22.2 Summary metric aggregation improvements
+
+- **File:** `airflow-core/src/airflow/provider_governance/summary_metrics.py`
+  - Added placeholder-row detection and exclusion so "no open issues/PRs" synthetic rows do not distort totals/ratios.
+  - Added `recent_closures_30d` to support activity calculations independent of contributor/commit availability.
+  - Clarified field semantics via docs:
+    - `contributors` is a summed row-level signal (not unique humans across the provider).
+    - `commits_30d` key name is retained for compatibility while representing summed PR commit totals from synced rows.
+
+### 22.3 Health score rebalance (softening + final uplift)
+
+- **File:** `airflow-core/src/airflow/provider_governance/health_score.py`
+  - Rebalanced component weights to reduce over-penalization.
+  - Softened backlog and resolution penalties.
+  - `pr_merge` contribution is skipped when there are zero closed PRs to avoid structural false negatives.
+  - Activity signal now uses strongest available activity sub-signal rather than averaging weak signals.
+  - Inactive-provider multiplier kept conservative, then final score receives a uniform post-composite bump:
+    - `_FINAL_BUMP_SCALE = 1.03`
+    - `_FINAL_BUMP_OFFSET = 2.0`
+  - Status bands updated to reflect the adjusted score distribution.
+
+### 22.4 DB resilience for partial states
+
+- **New migration:** `airflow-core/src/airflow/migrations/versions/0110_3_2_0_repair_missing_provider_governance_core_tables.py`
+  - Adds an idempotent repair path for environments where Provider Governance core tables are missing (for example after partial/failed setup states).
+  - Ensures `providers` and `provider_metrics` exist so feature development and sync paths can proceed safely.
+
+### 22.5 API contract and route behavior clarification
+
+- **File:** `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py`
+  - Response model field descriptions were tightened for `contributors` and `commits_30d` to match backend derivation semantics.
+  - Sync route docstrings were updated to explicitly reflect refresh behavior and metric enrichment during sync.
+
+### 22.6 Test coverage expansion (backend + UI)
+
+- **Backend/API unit coverage added or expanded:**
+  - `airflow-core/tests/unit/provider_governance/test_health_score_additional.py`
+  - `airflow-core/tests/unit/provider_governance/test_summary_metrics_additional.py`
+  - `airflow-core/tests/unit/provider_governance/test_github_metric_derived.py`
+  - `airflow-core/tests/unit/provider_governance/test_github_metric_derived_additional.py`
+  - `airflow-core/tests/unit/provider_governance/test_github_metrics_helpers.py`
+  - `airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
+
+- **UI test suite split into focused files:**
+  - `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.load.test.tsx`
+  - `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.refresh.test.tsx`
+  - `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.filters.test.tsx`
+  - `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.load.test.tsx`
+  - `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.interactions.test.tsx`
+
+### 22.7 Development/testing process artifacts
+
+- **Testing plan artifact:** `PROVIDER_GOVERNANCE_TESTING_PLAN.md`
+  - Captures coding test strategy, integration/manual verification checklist, and report-oriented validation structure for this branch work.
+
