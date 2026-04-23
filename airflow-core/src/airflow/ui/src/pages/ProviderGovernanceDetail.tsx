@@ -22,8 +22,6 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import { toaster } from "src/components/ui";
 import { getRedirectPath } from "src/utils/links";
 
-type ProviderStatus = "healthy" | "warning" | "critical";
-
 type ApiProvider = {
   readonly display_name: string;
   readonly id: number;
@@ -60,22 +58,29 @@ type ApiProviderDetail = {
     readonly avg_resolution_hours: number | null;
     readonly commits_30d: number;
     readonly contributors: number;
+    readonly health_score: number | null;
+    readonly health_status: string | null;
     readonly issues_closed: number;
     readonly issues_open: number;
     readonly issues_total: number;
     readonly last_release: string | null;
+    readonly pr_merge_rate: number;
     readonly prs_closed: number;
     readonly prs_open: number;
     readonly prs_total: number;
+    /** Issues/PRs closed in the last 30 days (activity signal for health score). */
+    readonly recent_closures_30d?: number;
   };
 };
 
-const getDummyHealthScore = (provider: ApiProvider): number => {
-  const seed = provider.id * 9973 + provider.name.length * 7919;
-  return seed % 101;
+const formatHealthScore = (score: number | null): string => {
+  if (score === null) {
+    return "—";
+  }
+  return score.toFixed(1);
 };
 
-const getStatusBadgeProps = (status: ProviderStatus) => {
+const getStatusBadgeProps = (status: string | null) => {
   switch (status) {
     case "healthy":
       return { colorPalette: "green", label: "Healthy" };
@@ -84,7 +89,7 @@ const getStatusBadgeProps = (status: ProviderStatus) => {
     case "critical":
       return { colorPalette: "red", label: "Critical" };
     default:
-      return { colorPalette: "gray", label: "Unknown" };
+      return { colorPalette: "gray", label: "N/A" };
   }
 };
 
@@ -191,9 +196,9 @@ const ProviderGovernanceDetail = () => {
   const provider = data?.provider;
   const summary = data?.summary;
 
-  const healthScore = useMemo(() => (provider ? getDummyHealthScore(provider) : 0), [provider]);
-  const status: ProviderStatus = healthScore >= 70 ? "healthy" : healthScore >= 40 ? "warning" : "critical";
-  const statusBadge = getStatusBadgeProps(status);
+  const healthScore = summary?.health_score ?? null;
+  const apiStatus = summary?.health_status ?? null;
+  const statusBadge = getStatusBadgeProps(apiStatus);
 
   const issues = data?.issues ?? [];
   const prs = data?.prs ?? [];
@@ -292,7 +297,7 @@ const ProviderGovernanceDetail = () => {
         <StatCard
           label="Health Score"
           sublabel={isLoading ? undefined : statusBadge.label}
-          value={isLoading ? "—" : healthScore}
+          value={isLoading ? "—" : formatHealthScore(healthScore)}
         />
         <StatCard
           label="Total Issues"

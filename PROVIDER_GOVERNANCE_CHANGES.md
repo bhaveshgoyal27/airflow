@@ -179,7 +179,7 @@ This sprint integrates the previously static Provider Governance dashboards with
   - Loads provider registry from `GET /ui/provider-governance/providers`.
   - Loads per-provider aggregates from `GET /ui/provider-governance/providers/summary`.
   - Clicking **Refresh metrics** triggers GitHub sync and then re-fetches provider summary so numbers update.
-  - **Health score/status remains dummy** (frontend deterministic function) until scoring logic is implemented.
+  - **Health score/status** come from the API (`health_score`, `health_status` on the summary response).
 
 ### Detail page now reads DB rows
 - **File:** `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.tsx`
@@ -252,7 +252,7 @@ These formulas describe how the overview and detail pages compute and display me
 | PR Merge Rate (per provider) | `provider_metrics_pr` | \( (\text{prs\_closed} / \text{prs\_total}) \times 100 \) where `prs_closed = #(status='CLOSED')`. Note: this currently treats CLOSED as "merged/closed" (no separate merged flag). |
 | Avg Resolution (per provider) | `provider_metrics` | Average of \( (\text{date\_close}-\text{date\_open}) \times 24 \) hours across rows where `status='CLOSED'` and `date_close IS NOT NULL`. |
 | Avg Resolution (top card) | `provider_metrics` | Average of per-provider averages (ignoring providers with no closed rows). Displayed in **days** in the UI via \( \text{round(hours}/24) \). |
-| Health score / health status | UI (dummy) | Deterministic dummy function from provider `id` and `name.length`; used for status badges and sorting until backend scoring is implemented. |
+| Health score / health status | API (`health_score.py`) | Weighted composite from issue backlog, resolution time, PR merge rate, PR backlog, and activity; inactive providers receive a 0.5 multiplier. Returned as `health_score` (one decimal) and `health_status` (`healthy` / `warning` / `critical`) on `GET .../providers/summary` and in detail `summary`. See §21. |
 
 ---
 
@@ -319,3 +319,13 @@ These formulas describe how the overview and detail pages compute and display me
 - Removed the "Contributors" stat card (was showing `0` with `"0 commits (30d)"` sublabel).
 - Removed the `totalContributors` and `commits30d` variable declarations.
 - Stat grid adjusted from 5 → 4 columns (Health Score, Total Issues, Avg Resolution, PR Volume).
+
+---
+
+## 21. Server-side health score and shared summary metrics
+
+- **Files:**
+  - `airflow-core/src/airflow/provider_governance/summary_metrics.py` — `build_provider_summary_metrics`: single aggregation from `provider_metrics` / `provider_metrics_pr` rows (used by list and detail routes).
+  - `airflow-core/src/airflow/provider_governance/health_score.py` — `compute_health_score`: renormalized component weights; `null` score when no component applies; `is_active` penalty.
+  - `airflow-core/src/airflow/api_fastapi/core_api/routes/ui/provider_governance.py` — summary and detail responses include `health_score`, `health_status`; detail `summary` aligns with list (including `pr_merge_rate`, `contributors`, `commits_30d`).
+  - `airflow-core/tests/unit/provider_governance/test_health_score.py` — golden expectations for the scorer.
