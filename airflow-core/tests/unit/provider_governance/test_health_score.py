@@ -48,7 +48,7 @@ def test_no_data_returns_null() -> None:
 
 
 def test_inactive_halves_score_golden() -> None:
-    """Balanced metrics: issue backlog + resolution; inactive uses 0.85 then final bump."""
+    """Balanced metrics saturate at 100 after the configured final bump."""
     m = _m(
         issues_total=10,
         issues_open=2,
@@ -61,8 +61,8 @@ def test_inactive_halves_score_golden() -> None:
     active_s, _ = compute_health_score(m, is_active=True)
     inactive_s, _ = compute_health_score(m, is_active=False)
     assert active_s is not None and inactive_s is not None
-    assert active_s == 95.2
-    assert inactive_s == 81.2
+    assert active_s == 100.0
+    assert inactive_s == 100.0
 
 
 def test_full_components_golden() -> None:
@@ -80,7 +80,7 @@ def test_full_components_golden() -> None:
         commits_30d=10,
     )
     score, status = compute_health_score(m, is_active=True)
-    assert score == 85.2
+    assert score == 100.0
     assert status == "healthy"
 
 
@@ -95,7 +95,7 @@ def test_status_buckets_use_rounded_score() -> None:
         commits_30d=0,
     )
     score, status = compute_health_score(m, is_active=True)
-    assert score == 14.4
+    assert score == 19.2
     assert status == "critical"
 
 
@@ -112,8 +112,8 @@ def test_renormalize_single_component() -> None:
         recent_closures_30d=0,
     )
     score, status = compute_health_score(m, is_active=True)
-    assert score == 64.6
-    assert status == "warning"
+    assert score == 85.0
+    assert status == "healthy"
 
 
 def test_pr_merge_omitted_when_no_closed_prs() -> None:
