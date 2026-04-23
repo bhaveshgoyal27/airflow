@@ -57,6 +57,75 @@ def test_provider_summary_returns_list_payload(test_client):
     assert isinstance(response.json(), list)
 
 
+def test_create_provider_then_list_and_delete(test_client):
+    create_response = test_client.post(
+        "/provider-governance/providers",
+        json={
+            "name": "google",
+            "display_name": "Google Cloud Platform",
+            "lifecycle": "production",
+            "is_active": True,
+            "steward_email": "gcp@example.org",
+        },
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["name"] == "google"
+    assert created["display_name"] == "Google Cloud Platform"
+    assert created["lifecycle"] == "production"
+    assert created["is_active"] is True
+    assert created["steward_email"] == "gcp@example.org"
+
+    list_response = test_client.get("/provider-governance/providers")
+    assert list_response.status_code == 200
+    rows = list_response.json()
+    assert any(row["name"] == "google" and row["display_name"] == "Google Cloud Platform" for row in rows)
+
+    delete_response = test_client.delete(f"/provider-governance/providers/{created['id']}")
+    assert delete_response.status_code == 204
+
+    list_after_delete = test_client.get("/provider-governance/providers")
+    assert list_after_delete.status_code == 200
+    assert all(row["name"] != "google" for row in list_after_delete.json())
+
+
+def test_create_provider_rejects_invalid_lifecycle(test_client):
+    response = test_client.post(
+        "/provider-governance/providers",
+        json={
+            "name": "snowflake",
+            "display_name": "Snowflake",
+            "lifecycle": "unknown",
+            "is_active": True,
+            "steward_email": "snowflake@example.org",
+        },
+    )
+    assert response.status_code == 400
+    assert "lifecycle must be one of" in response.json()["detail"]
+
+
+def test_create_provider_rejects_duplicate_name(test_client):
+    payload = {
+        "name": "amazon",
+        "display_name": "Amazon Web Services",
+        "lifecycle": "production",
+        "is_active": True,
+        "steward_email": "aws@example.org",
+    }
+    first = test_client.post("/provider-governance/providers", json=payload)
+    assert first.status_code == 200
+
+    second = test_client.post("/provider-governance/providers", json=payload)
+    assert second.status_code == 409
+    assert second.json()["detail"] == "A provider with this name already exists."
+
+
+def test_delete_unknown_provider_returns_404(test_client):
+    response = test_client.delete("/provider-governance/providers/99999")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Provider with id=99999 not found"
+
+
 def test_sync_endpoints_delegate_to_github_sync(test_client, monkeypatch):
     def _fake_issue_sync(provider_id, session, github_token):
         assert provider_id == 42
