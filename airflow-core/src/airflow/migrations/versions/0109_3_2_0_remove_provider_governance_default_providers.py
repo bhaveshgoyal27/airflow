@@ -45,6 +45,8 @@ _DEFAULT_NAMES = ("google", "amazon", "snowflake", "microsoft-azure")
 def upgrade():
     """Delete default providers (metrics cascade via FK)."""
     conn = op.get_bind()
+    if not sa.inspect(conn).has_table("providers"):
+        return
     for name in _DEFAULT_NAMES:
         conn.execute(sa.text("DELETE FROM providers WHERE name = :name"), {"name": name})
 
@@ -52,6 +54,8 @@ def upgrade():
 def downgrade():
     """Re-insert the four default providers if missing (matches old 0107 behavior)."""
     conn = op.get_bind()
+    if not sa.inspect(conn).has_table("providers"):
+        return
     defaults = [
         ("google", "Google Cloud Platform"),
         ("amazon", "Amazon Web Services"),

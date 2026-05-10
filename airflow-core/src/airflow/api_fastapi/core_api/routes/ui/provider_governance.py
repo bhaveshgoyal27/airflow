@@ -25,7 +25,7 @@ from datetime import date
 
 from fastapi import HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from airflow.api_fastapi.common.db.common import SessionDep
@@ -37,6 +37,8 @@ from airflow.provider_governance.github_metrics import (
     sync_provider_issues_from_github,
     sync_provider_prs_from_github,
 )
+from airflow.provider_governance.health_score import compute_health_score
+from airflow.provider_governance.summary_metrics import build_provider_summary_metrics
 
 # GitHub token for API calls (avoids rate limit; 5000 req/hr with token vs 60/hr without)
 _GITHUB_TOKEN = os.environ.get("AIRFLOW_PROVIDER_GOVERNANCE_GITHUB_TOKEN") or os.environ.get(
@@ -96,8 +98,22 @@ class ProviderGovernanceProviderSummaryRow(BaseModel):
     prs_open: int
     prs_closed: int
     pr_merge_rate: float
-    contributors: int
-    commits_30d: int
+    contributors: int = Field(
+        ...,
+        description=(
+            "Sum of per-issue/PR contributor signals from GitHub (assignees, authors, reviewers); "
+            "not deduplicated across rows."
+        ),
+    )
+    commits_30d: int = Field(
+        ...,
+        description=(
+            "Sum of GitHub PR commit totals on tracked rows. Field name is legacy; "
+            "not restricted to the last calendar 30 days."
+        ),
+    )
+    health_score: float | None = None
+    health_status: str | None = None
 
 
 _ISSUE_NUMBER_RE = re.compile(r"/issues/(?P<num>\d+)(?:$|[/?#])")
@@ -166,6 +182,19 @@ def list_providers(session: SessionDep) -> list[dict]:
     ]
 
 
+@provider_governance_router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_provider(provider_id: int, session: SessionDep) -> None:
+    """Delete a provider and cascade-delete related metrics rows."""
+    provider = session.scalar(select(Provider).where(Provider.id == provider_id))
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id={provider_id} not found",
+        )
+    session.delete(provider)
+    session.commit()
+
+
 @provider_governance_router.get("/providers/summary")
 def get_providers_summary(session: SessionDep) -> list[ProviderGovernanceProviderSummaryRow]:
     """
@@ -173,85 +202,33 @@ def get_providers_summary(session: SessionDep) -> list[ProviderGovernanceProvide
 
     Aggregates rows already synced into provider_metrics / provider_metrics_pr.
     """
-    # Issues aggregates
-    issue_counts = session.execute(
-        select(
-            ProviderMetric.provider_id,
-            func.count().label("issues_total"),
-            func.sum(case((ProviderMetric.status == "OPEN", 1), else_=0)).label("issues_open"),
-            func.sum(case((ProviderMetric.status == "CLOSED", 1), else_=0)).label("issues_closed"),
-        ).group_by(ProviderMetric.provider_id)
-    ).all()
-    issues_by_provider = {
-        int(r.provider_id): {
-            "issues_total": int(r.issues_total or 0),
-            "issues_open": int(r.issues_open or 0),
-            "issues_closed": int(r.issues_closed or 0),
-        }
-        for r in issue_counts
-    }
-
-    # PR aggregates
-    pr_counts = session.execute(
-        select(
-            ProviderMetricPR.provider_id,
-            func.count().label("prs_total"),
-            func.sum(case((ProviderMetricPR.status == "OPEN", 1), else_=0)).label("prs_open"),
-            func.sum(case((ProviderMetricPR.status == "CLOSED", 1), else_=0)).label("prs_closed"),
-        ).group_by(ProviderMetricPR.provider_id)
-    ).all()
-    prs_by_provider = {
-        int(r.provider_id): {
-            "prs_total": int(r.prs_total or 0),
-            "prs_open": int(r.prs_open or 0),
-            "prs_closed": int(r.prs_closed or 0),
-        }
-        for r in pr_counts
-    }
-
-    provider_ids = session.scalars(select(Provider.id).order_by(Provider.id)).all()
+    providers = session.scalars(select(Provider).order_by(Provider.id)).all()
     out: list[ProviderGovernanceProviderSummaryRow] = []
-    for pid in provider_ids:
-        i = issues_by_provider.get(int(pid), {"issues_total": 0, "issues_open": 0, "issues_closed": 0})
-        p = prs_by_provider.get(int(pid), {"prs_total": 0, "prs_open": 0, "prs_closed": 0})
-        issues_rows = (
-            session.scalars(select(ProviderMetric).where(ProviderMetric.provider_id == int(pid))).unique().all()
+    for provider in providers:
+        pid = int(provider.id)
+        issues_rows = list(
+            session.scalars(select(ProviderMetric).where(ProviderMetric.provider_id == pid)).unique().all()
         )
-        pr_rows = (
-            session.scalars(select(ProviderMetricPR).where(ProviderMetricPR.provider_id == int(pid))).unique().all()
+        pr_rows = list(
+            session.scalars(select(ProviderMetricPR).where(ProviderMetricPR.provider_id == pid)).unique().all()
         )
-
-        closed_deltas_hours = [
-            (row.date_close - row.date_open).days * 24
-            for row in issues_rows
-            if row.status == "CLOSED" and row.date_close is not None and row.date_open is not None
-        ]
-        avg_resolution_hours = (
-            round(sum(closed_deltas_hours) / len(closed_deltas_hours), 2) if closed_deltas_hours else None
-        )
-
-        prs_total = p["prs_total"]
-        pr_merge_rate = round((p["prs_closed"] / prs_total) * 100, 2) if prs_total > 0 else 0.0
-
-        contributors = int(
-            sum((row.contributor_count or 0) for row in issues_rows)
-            + sum((row.contributor_count or 0) for row in pr_rows)
-        )
-        commits_30d = int(sum((row.commit_count or 0) for row in issues_rows) + sum((row.commit_count or 0) for row in pr_rows))
-
+        m = build_provider_summary_metrics(issues_rows, pr_rows)
+        health_score, health_status = compute_health_score(m, is_active=provider.is_active)
         out.append(
             ProviderGovernanceProviderSummaryRow(
-                provider_id=int(pid),
-                issues_total=i["issues_total"],
-                issues_open=i["issues_open"],
-                issues_closed=i["issues_closed"],
-                prs_total=p["prs_total"],
-                prs_open=p["prs_open"],
-                prs_closed=p["prs_closed"],
-                avg_resolution_hours=avg_resolution_hours,
-                pr_merge_rate=pr_merge_rate,
-                contributors=contributors,
-                commits_30d=commits_30d,
+                provider_id=pid,
+                issues_total=m.issues_total,
+                issues_open=m.issues_open,
+                issues_closed=m.issues_closed,
+                prs_total=m.prs_total,
+                prs_open=m.prs_open,
+                prs_closed=m.prs_closed,
+                avg_resolution_hours=m.avg_resolution_hours,
+                pr_merge_rate=m.pr_merge_rate,
+                contributors=m.contributors,
+                commits_30d=m.commits_30d,
+                health_score=health_score,
+                health_status=health_status,
             )
         )
     return out
@@ -290,17 +267,8 @@ def get_provider_detail(provider_id: int, session: SessionDep) -> ProviderGovern
         .all()
     )
 
-    issue_open = sum(1 for r in issues_rows if r.status == "OPEN")
-    issue_closed = sum(1 for r in issues_rows if r.status == "CLOSED")
-    pr_open = sum(1 for r in pr_rows if r.status == "OPEN")
-    pr_closed = sum(1 for r in pr_rows if r.status == "CLOSED")
-
-    closed_deltas_hours = [
-        (r.date_close - r.date_open).days * 24
-        for r in issues_rows
-        if r.status == "CLOSED" and r.date_close is not None and r.date_open is not None
-    ]
-    avg_resolution_hours = round(sum(closed_deltas_hours) / len(closed_deltas_hours), 2) if closed_deltas_hours else None
+    m = build_provider_summary_metrics(list(issues_rows), list(pr_rows))
+    health_score, health_status = compute_health_score(m, is_active=provider.is_active)
 
     issues = [
         ProviderGovernanceIssueRow(
@@ -338,16 +306,9 @@ def get_provider_detail(provider_id: int, session: SessionDep) -> ProviderGovern
         issues=issues,
         prs=prs,
         summary={
-            "issues_total": len(issues_rows),
-            "issues_open": issue_open,
-            "issues_closed": issue_closed,
-            "prs_total": len(pr_rows),
-            "prs_open": pr_open,
-            "prs_closed": pr_closed,
-            "avg_resolution_hours": avg_resolution_hours,
-            # Placeholders until implemented.
-            "contributors": 0,
-            "commits_30d": 0,
+            **m.as_summary_dict(),
+            "health_score": health_score,
+            "health_status": health_status,
             "last_release": None,
         },
     )
@@ -361,11 +322,9 @@ def sync_provider_issues(
     """
     Sync provider_metrics from GitHub for the given provider.
 
-    Fetches open issues from GitHub for the provider (by name), then:
-    - Inserts new issues not yet in the DB.
-    - Leaves existing issues unchanged.
-    - Marks issues that were OPEN but are now closed/not in the open list,
-      updating date_close, status, contributor_count, commit_count.
+    Fetches open issues for the provider label, inserts new rows, refreshes OPEN rows
+    (title, contributor signal from assignees/author), and closes items that are no
+    longer open on GitHub.
     """
     try:
         return sync_provider_issues_from_github(
@@ -388,7 +347,8 @@ def sync_provider_prs(
     """
     Sync provider_metrics_pr from GitHub open pull requests for the given provider.
 
-    Same semantics as issue sync: insert new PRs, leave existing, close stale OPEN rows.
+    Inserts new PRs with contributor and commit counts, refreshes OPEN rows each sync,
+    and closes stale OPEN rows using the final GitHub PR payload when available.
     """
     try:
         return sync_provider_prs_from_github(

@@ -51,6 +51,8 @@ type ApiProviderSummaryRow = {
   readonly avg_resolution_hours: number | null;
   readonly commits_30d: number;
   readonly contributors: number;
+  readonly health_score: number | null;
+  readonly health_status: string | null;
   readonly issues_closed: number;
   readonly issues_open: number;
   readonly issues_total: number;
@@ -61,45 +63,30 @@ type ApiProviderSummaryRow = {
   readonly provider_id: number;
 };
 
-type HealthStatus = "healthy" | "warning" | "critical";
-
-type DummyProviderMetrics = {
-  readonly healthScore: number; // 0-100
-  readonly healthStatus: HealthStatus;
+type ProviderGovernanceMetrics = {
   readonly avgResolutionHours: number | null;
+  readonly commits30d: number;
+  readonly contributors: number;
+  readonly healthScore: number | null;
+  readonly healthStatus: string | null;
   readonly openIssues: number;
   readonly prMergeRate: number;
   readonly prVolume: number;
 };
 
 type ProviderWithMetrics = ApiProvider & {
-  readonly metrics: DummyProviderMetrics;
+  readonly metrics: ProviderGovernanceMetrics;
 };
 
-const getHealthStatus = (healthScore: number): HealthStatus => {
-  if (healthScore >= 70) return "healthy";
-  if (healthScore >= 40) return "warning";
-  return "critical";
-};
-
-const getDummyMetrics = (provider: ApiProvider): DummyProviderMetrics => {
-  // Deterministic dummy scorer until the backend health scoring lands.
-  const seed = provider.id * 9973 + provider.name.length * 7919;
-  const healthScore = seed % 101; // 0-100
-  const healthStatus = getHealthStatus(healthScore);
-
-  return {
-    healthScore,
-    healthStatus,
-    avgResolutionHours: null,
-    openIssues: 0,
-    prMergeRate: 0,
-    prVolume: 0,
-  };
+const formatHealthScore = (score: number | null): string => {
+  if (score === null) {
+    return "—";
+  }
+  return score.toFixed(1);
 };
 
 const getHealthBadgeProps = (
-  status: HealthStatus,
+  status: string | null,
 ): {
   readonly colorPalette: string;
   readonly label: string;
@@ -112,7 +99,7 @@ const getHealthBadgeProps = (
     case "critical":
       return { colorPalette: "red", label: "Critical" };
     default:
-      return { colorPalette: "gray", label: "Unknown" };
+      return { colorPalette: "gray", label: "N/A" };
   }
 };
 
@@ -135,14 +122,21 @@ const StatCard = ({
 
 const ProviderRow = ({
   index,
+  isSelected,
   provider,
   metrics,
+  onToggle,
 }: {
   readonly index: number;
+  readonly isSelected: boolean;
   readonly provider: ApiProvider;
-  readonly metrics: DummyProviderMetrics;
+  readonly metrics: ProviderGovernanceMetrics;
+  readonly onToggle: (providerId: number) => void;
 }) => (
   <Table.Row>
+    <Table.Cell>
+      <Checkbox checked={isSelected} onChange={() => onToggle(provider.id)} size="sm" />
+    </Table.Cell>
     <Table.Cell>{index + 1}</Table.Cell>
     <Table.Cell>
       <RouterLink to={`/provider-governance/${provider.id}`}>
@@ -183,6 +177,9 @@ const ProviderGovernance = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"health_score" | "open_issues" | "name">("health_score");
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [selectedProviderIds, setSelectedProviderIds] = useState<Array<number>>([]);
+  const [isDeletingProviders, setIsDeletingProviders] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const loadProviders = useCallback(async () => {
     const origin = window.location.origin;
@@ -331,15 +328,23 @@ const ProviderGovernance = () => {
     }
   };
 
+  const handleToggleProviderSelection = useCallback((providerId: number) => {
+    setSelectedProviderIds((prev) =>
+      prev.includes(providerId) ? prev.filter((id) => id !== providerId) : [...prev, providerId],
+    );
+  }, []);
+
   const providersWithMetrics = useMemo<Array<ProviderWithMetrics>>(() => {
     return providersList.map((p) => {
-      const base = getDummyMetrics(p);
       const summaryRow = providerSummaries[p.id];
       return {
         ...p,
         metrics: {
-          ...base,
           avgResolutionHours: summaryRow?.avg_resolution_hours ?? null,
+          commits30d: summaryRow?.commits_30d ?? 0,
+          contributors: summaryRow?.contributors ?? 0,
+          healthScore: summaryRow?.health_score ?? null,
+          healthStatus: summaryRow?.health_status ?? null,
           openIssues: summaryRow?.issues_open ?? 0,
           prMergeRate: summaryRow?.pr_merge_rate ?? 0,
           prVolume: summaryRow?.prs_total ?? 0,
@@ -379,7 +384,20 @@ const ProviderGovernance = () => {
   }, [providersWithMetrics]);
 
   const sortedProviders = useMemo(() => {
-    return [...providersWithMetrics].sort((a, b) => b.metrics.healthScore - a.metrics.healthScore);
+    return [...providersWithMetrics].sort((a, b) => {
+      const as = a.metrics.healthScore;
+      const bs = b.metrics.healthScore;
+      if (as === null && bs === null) {
+        return 0;
+      }
+      if (as === null) {
+        return 1;
+      }
+      if (bs === null) {
+        return -1;
+      }
+      return bs - as;
+    });
   }, [providersWithMetrics]);
 
   const displayedProviders = useMemo(() => {
@@ -396,9 +414,98 @@ const ProviderGovernance = () => {
     return [...filtered].sort((a, b) => {
       if (sortBy === "open_issues") return b.metrics.openIssues - a.metrics.openIssues;
       if (sortBy === "name") return a.display_name.localeCompare(b.display_name);
-      return b.metrics.healthScore - a.metrics.healthScore;
+      const as = a.metrics.healthScore;
+      const bs = b.metrics.healthScore;
+      if (as === null && bs === null) {
+        return 0;
+      }
+      if (as === null) {
+        return 1;
+      }
+      if (bs === null) {
+        return -1;
+      }
+      return bs - as;
     });
   }, [providersWithMetrics, searchQuery, sortBy]);
+
+  const selectedVisibleProviderCount = useMemo(
+    () => displayedProviders.filter((provider) => selectedProviderIds.includes(provider.id)).length,
+    [displayedProviders, selectedProviderIds],
+  );
+  const allVisibleProvidersSelected =
+    displayedProviders.length > 0 && selectedVisibleProviderCount === displayedProviders.length;
+
+  const handleToggleSelectAllVisible = useCallback(() => {
+    if (allVisibleProvidersSelected) {
+      setSelectedProviderIds((prev) =>
+        prev.filter((id) => !displayedProviders.some((provider) => provider.id === id)),
+      );
+      return;
+    }
+    setSelectedProviderIds((prev) => {
+      const selected = new Set(prev);
+      displayedProviders.forEach((provider) => selected.add(provider.id));
+      return Array.from(selected);
+    });
+  }, [allVisibleProvidersSelected, displayedProviders]);
+
+  const handleDeleteProviders = useCallback(async () => {
+    if (selectedProviderIds.length === 0) {
+      toaster.create({
+        title: "No providers selected",
+        description: "Select at least one provider to delete.",
+        type: "error",
+      });
+      return;
+    }
+    setIsDeletingProviders(true);
+    const origin = window.location.origin;
+    try {
+      await Promise.all(
+        selectedProviderIds.map(async (providerId) => {
+          const res = await fetch(
+            `${origin}${getRedirectPath(`ui/provider-governance/providers/${providerId}`)}`,
+            { method: "DELETE" },
+          );
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(
+              (err as { detail?: string })?.detail ?? `Failed to delete provider with id=${providerId}`,
+            );
+          }
+        }),
+      );
+      toaster.create({
+        title: "Providers deleted",
+        description: `Deleted ${selectedProviderIds.length} provider(s).`,
+        type: "success",
+      });
+      setSelectedProviderIds([]);
+      await loadProviders();
+      await loadProviderSummaries();
+    } catch (err) {
+      toaster.create({
+        title: "Could not delete providers",
+        description: err instanceof Error ? err.message : "Unknown error",
+        type: "error",
+      });
+    } finally {
+      setIsDeletingProviders(false);
+    }
+  }, [loadProviderSummaries, loadProviders, selectedProviderIds]);
+
+  const openDeleteDialog = useCallback(() => {
+    if (selectedProviderIds.length === 0) {
+      toaster.create({
+        title: "No providers selected",
+        description: "Select at least one provider to delete.",
+        type: "error",
+      });
+      return;
+    }
+    setDeleteOpen(true);
+  }, [selectedProviderIds.length]);
 
   const totalProviders = providersList.length;
   const topTwo = sortedProviders.slice(0, 2);
@@ -421,6 +528,16 @@ const ProviderGovernance = () => {
         <HStack gap={3} flexWrap="wrap" justifyContent="flex-end">
           <Button onClick={() => setAddOpen(true)} size="sm" variant="solid">
             Add provider
+          </Button>
+          <Button
+            colorPalette="red"
+            disabled={selectedProviderIds.length === 0}
+            loading={isDeletingProviders}
+            onClick={openDeleteDialog}
+            size="sm"
+            variant="outline"
+          >
+            Delete providers
           </Button>
           <Button loading={isRefreshing} onClick={handleRefresh} size="sm" variant="outline">
             Refresh metrics
@@ -499,6 +616,37 @@ const ProviderGovernance = () => {
         </Dialog.Content>
       </Dialog.Root>
 
+      <Dialog.Root onOpenChange={(d) => setDeleteOpen(d.open)} open={deleteOpen} size="md">
+        <Dialog.Content backdrop>
+          <Dialog.Header>
+            <Heading size="md">Delete providers</Heading>
+          </Dialog.Header>
+          <Dialog.CloseTrigger />
+          <Dialog.Body>
+            <Text>
+              Delete {selectedProviderIds.length} provider{selectedProviderIds.length === 1 ? "" : "s"}?
+            </Text>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <HStack gap={3}>
+              <Button onClick={() => setDeleteOpen(false)} variant="outline">
+                Cancel
+              </Button>
+              <Button
+                colorPalette="red"
+                loading={isDeletingProviders}
+                onClick={async () => {
+                  await handleDeleteProviders();
+                  setDeleteOpen(false);
+                }}
+              >
+                Delete
+              </Button>
+            </HStack>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
+
       <SimpleGrid columns={{ base: 1, md: 3 }} gap={4} mb={6}>
         <StatCard label="Total Providers (in this cycle)" value={totalProviders} />
         <StatCard label="Total Issues" value={summary.totalIssues} />
@@ -546,7 +694,7 @@ const ProviderGovernance = () => {
                     const { colorPalette } = getHealthBadgeProps(p.metrics.healthStatus);
                     return (
                       <Badge borderRadius="full" colorPalette={colorPalette} px={3} py={1} variant="subtle">
-                        {p.metrics.healthScore}
+                        {formatHealthScore(p.metrics.healthScore)}
                       </Badge>
                     );
                   })()}
@@ -576,7 +724,7 @@ const ProviderGovernance = () => {
                     const { colorPalette } = getHealthBadgeProps(p.metrics.healthStatus);
                     return (
                       <Badge borderRadius="full" colorPalette={colorPalette} px={3} py={1} variant="subtle">
-                        {p.metrics.healthScore}
+                        {formatHealthScore(p.metrics.healthScore)}
                       </Badge>
                     );
                   })()}
@@ -620,6 +768,13 @@ const ProviderGovernance = () => {
           <Table.Root size="sm">
             <Table.Header>
               <Table.Row>
+                <Table.ColumnHeader>
+                  <Checkbox
+                    checked={allVisibleProvidersSelected}
+                    onChange={handleToggleSelectAllVisible}
+                    size="sm"
+                  />
+                </Table.ColumnHeader>
                 <Table.ColumnHeader>#</Table.ColumnHeader>
                 <Table.ColumnHeader>Provider</Table.ColumnHeader>
                 <Table.ColumnHeader>Health</Table.ColumnHeader>
@@ -629,7 +784,14 @@ const ProviderGovernance = () => {
             </Table.Header>
             <Table.Body>
               {displayedProviders.map((provider, index) => (
-                <ProviderRow index={index} key={provider.id} provider={provider} metrics={provider.metrics} />
+                <ProviderRow
+                  index={index}
+                  isSelected={selectedProviderIds.includes(provider.id)}
+                  key={provider.id}
+                  metrics={provider.metrics}
+                  onToggle={handleToggleProviderSelection}
+                  provider={provider}
+                />
               ))}
             </Table.Body>
           </Table.Root>
@@ -658,7 +820,7 @@ const ProviderGovernance = () => {
               {providersWithMetrics.map((p) => (
                 <Table.Row key={p.id}>
                   <Table.Cell>{p.display_name}</Table.Cell>
-                  <Table.Cell>{p.metrics.healthScore}</Table.Cell>
+                  <Table.Cell>{formatHealthScore(p.metrics.healthScore)}</Table.Cell>
                   <Table.Cell>{p.metrics.openIssues}</Table.Cell>
                   <Table.Cell>{p.metrics.prMergeRate}%</Table.Cell>
                 </Table.Row>

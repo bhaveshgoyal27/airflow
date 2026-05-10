@@ -1210,6 +1210,7 @@ def upgradedb(
     import_all_models()
 
     config = _get_alembic_config()
+    current_revision = _get_current_revision(session=session)
 
     if show_sql_only:
         if not from_revision:
@@ -1238,7 +1239,7 @@ def upgradedb(
     if errors_seen:
         exit(1)
 
-    if not _get_current_revision(session=session) and not to_revision:
+    if not current_revision and not to_revision:
         # New DB; initialize and exit
         initdb(session=session)
         return

@@ -18,16 +18,19 @@
 """
 GitHub metrics fetching and provider_metrics table sync.
 
-func1: sync_provider_issues_from_github(provider_id, session)
-  - Takes provider id, gets provider name from providers table, fetches open issues
-    from GitHub for that provider, then updates provider_metrics:
-  - If issue was not already in the DB -> add entry
-  - If issue exists -> do nothing
-  - If issue was OPEN but is now closed/not in open list -> update date_close,
-    status, contributor_count, commit_count
+Issue sync:
+  - Fetches **open** issues for the provider label; inserts new rows.
+  - Each sync refreshes **OPEN** rows still in GitHub's open list (title, contributor signal).
+  - Rows that were OPEN but no longer appear open are closed; final GitHub payload sets
+    ``contributor_count`` (issue rows keep ``commit_count`` at 0).
 
-func2: fetch_open_issues_from_github(owner, repo, labels=None)
-  - Fetches all open issues from GitHub for the given repo (and optional labels).
+PR sync:
+  - Same pattern for open pulls; ``commit_count`` comes from GitHub's PR ``commits`` field
+    (full GET when the list payload omits it). ``contributor_count`` uses assignees, author,
+    and requested reviewers.
+
+Environment: set ``GITHUB_TOKEN`` or ``AIRFLOW_PROVIDER_GOVERNANCE_GITHUB_TOKEN`` for
+rate limits when enriching many PRs.
 """
 
 from __future__ import annotations
@@ -40,6 +43,11 @@ import httpx
 from sqlalchemy import func, select
 
 from airflow.models.provider_governance import Provider, ProviderMetric, ProviderMetricPR
+from airflow.provider_governance.github_metric_derived import (
+    commit_count_from_github_pull_payload,
+    contributor_signal_from_github_issue,
+    contributor_signal_from_github_pull,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -197,6 +205,75 @@ def _filter_issues_by_provider_label(
     return out
 
 
+def _normalized_github_link(url: str) -> str:
+    return (url or "").strip().rstrip("/")
+
+
+def _issue_dict_by_normalized_link(open_issues: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Map normalized html_url -> issue payload from GitHub open-issue list."""
+    out: dict[str, dict[str, Any]] = {}
+    for issue in open_issues:
+        link = _normalized_github_link(str(issue.get("html_url") or ""))
+        if link:
+            out[link] = issue
+    return out
+
+
+def _pull_dict_by_normalized_link(open_pulls: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Map normalized html_url -> pull payload from GitHub open-pull list."""
+    out: dict[str, dict[str, Any]] = {}
+    for pull in open_pulls:
+        link = _normalized_github_link(str(pull.get("html_url") or ""))
+        if link:
+            out[link] = pull
+    return out
+
+
+def _refresh_open_issue_metrics(
+    existing: list[ProviderMetric],
+    issue_by_link: dict[str, dict[str, Any]],
+) -> None:
+    """Update OPEN issue rows that still appear in GitHub open results (title, contributors)."""
+    for metric in existing:
+        if metric.status != "OPEN":
+            continue
+        issue = issue_by_link.get(metric.link.strip().rstrip("/"))
+        if not issue:
+            continue
+        metric.heading = (issue.get("title") or "").strip() or metric.heading
+        metric.contributor_count = contributor_signal_from_github_issue(issue)
+
+
+def _refresh_open_pr_metrics(
+    existing: list[ProviderMetricPR],
+    pull_by_link: dict[str, dict[str, Any]],
+    repo_owner: str,
+    repo_name: str,
+    github_token: str | None,
+) -> None:
+    """Update OPEN PR rows still in GitHub open results (title, contributors, commits)."""
+    for metric in existing:
+        if metric.status != "OPEN":
+            continue
+        pull = pull_by_link.get(metric.link.strip().rstrip("/"))
+        if not pull:
+            continue
+        metric.heading = (pull.get("title") or "").strip() or metric.heading
+        metric.contributor_count = contributor_signal_from_github_pull(pull)
+        commits = commit_count_from_github_pull_payload(pull)
+        if commits == 0:
+            num = pull.get("number")
+            if isinstance(num, int):
+                full = _fetch_single_pull(repo_owner, repo_name, num, token=github_token)
+                commits = commit_count_from_github_pull_payload(full or {})
+            else:
+                parsed = _parse_pr_number_from_url(metric.link, repo_owner, repo_name)
+                if parsed is not None:
+                    full = _fetch_single_pull(repo_owner, repo_name, parsed, token=github_token)
+                    commits = commit_count_from_github_pull_payload(full or {})
+        metric.commit_count = commits
+
+
 def _ensure_placeholder_metric(
     session: Session,
     provider_id: int,
@@ -249,7 +326,7 @@ def _add_new_issues(
             date_open=date_open_val,
             date_close=None,
             status="OPEN",
-            contributor_count=0,
+            contributor_count=contributor_signal_from_github_issue(issue),
             commit_count=0,
         )
         session.add(new_metric)
@@ -277,6 +354,7 @@ def _close_stale_metrics(
             metric.link, repo_owner, repo_name
         )
         date_close_val = None
+        single: dict[str, Any] | None = None
         if issue_number is not None:
             single = _fetch_single_issue(
                 repo_owner, repo_name, issue_number, token=github_token
@@ -287,7 +365,8 @@ def _close_stale_metrics(
             date_close_val = date.today()
         metric.date_close = date_close_val
         metric.status = "CLOSED"
-        metric.contributor_count = 0
+        if single:
+            metric.contributor_count = contributor_signal_from_github_issue(single)
         metric.commit_count = 0
         updated += 1
     return updated
@@ -304,11 +383,10 @@ def sync_provider_issues_from_github(
     """
     Sync provider_metrics from GitHub open issues for the given provider.
 
-    - Issues not in DB are inserted.
-    - Issues already in DB are left unchanged.
-    - Metrics that were OPEN but are no longer in the open-issues list are updated
-      (date_close, status=CLOSED, contributor_count, commit_count) by fetching
-      the issue from GitHub.
+    - Issues not in DB are inserted with contributor signals from the payload.
+    - OPEN rows still open on GitHub get refreshed (title, contributor_count).
+    - OPEN rows no longer in GitHub's open list are closed; contributor_count is set
+      from the final issue payload when available. Issue ``commit_count`` stays 0.
 
     :param provider_id: Primary key of the provider in the providers table.
     :param session: SQLAlchemy session for DB access.
@@ -391,8 +469,18 @@ def sync_provider_issues_from_github(
     added, unchanged = _add_new_issues(
         session, provider_id, open_issues, existing_by_link
     )
+    session.flush()
+    existing_all = (
+        session.scalars(
+            select(ProviderMetric).where(ProviderMetric.provider_id == provider_id)
+        )
+        .unique()
+        .all()
+    )
+    issue_by_link = _issue_dict_by_normalized_link(open_issues)
+    _refresh_open_issue_metrics(existing_all, issue_by_link)
     updated = _close_stale_metrics(
-        existing, open_issue_links, repo_owner, repo_name, github_token
+        existing_all, open_issue_links, repo_owner, repo_name, github_token
     )
 
     session.commit()
@@ -567,6 +655,9 @@ def _add_new_prs(
     provider_id: int,
     open_pulls: list[dict[str, Any]],
     existing_by_link: dict[str, ProviderMetricPR],
+    repo_owner: str,
+    repo_name: str,
+    github_token: str | None,
 ) -> tuple[int, int]:
     added = 0
     unchanged = 0
@@ -578,6 +669,13 @@ def _add_new_prs(
             unchanged += 1
             continue
         date_open_val = _parse_github_date(pull.get("created_at")) or date.today()
+        contrib = contributor_signal_from_github_pull(pull)
+        commits = commit_count_from_github_pull_payload(pull)
+        if commits == 0:
+            num = pull.get("number")
+            if isinstance(num, int):
+                full = _fetch_single_pull(repo_owner, repo_name, num, token=github_token)
+                commits = commit_count_from_github_pull_payload(full or {})
         new_row = ProviderMetricPR(
             provider_id=provider_id,
             link=link,
@@ -585,8 +683,8 @@ def _add_new_prs(
             date_open=date_open_val,
             date_close=None,
             status="OPEN",
-            contributor_count=0,
-            commit_count=0,
+            contributor_count=contrib,
+            commit_count=commits,
         )
         session.add(new_row)
         existing_by_link[link] = new_row
@@ -610,6 +708,7 @@ def _close_stale_pr_metrics(
             continue
         pr_number = _parse_pr_number_from_url(metric.link, repo_owner, repo_name)
         date_close_val = None
+        single: dict[str, Any] | None = None
         if pr_number is not None:
             single = _fetch_single_pull(repo_owner, repo_name, pr_number, token=github_token)
             if single:
@@ -621,8 +720,9 @@ def _close_stale_pr_metrics(
             date_close_val = date.today()
         metric.date_close = date_close_val
         metric.status = "CLOSED"
-        metric.contributor_count = 0
-        metric.commit_count = 0
+        if single:
+            metric.contributor_count = contributor_signal_from_github_pull(single)
+            metric.commit_count = commit_count_from_github_pull_payload(single)
         updated += 1
     return updated
 
@@ -638,7 +738,8 @@ def sync_provider_prs_from_github(
     """
     Sync provider_metrics_pr from GitHub open pull requests for the given provider.
 
-    Same behavior as issue sync: insert new, leave existing, close stale OPEN rows.
+    Inserts new rows with contributor and commit counts from GitHub; refreshes OPEN rows
+    each sync; closes stale OPEN rows with final payload counts when available.
     """
     provider = session.scalar(select(Provider).where(Provider.id == provider_id))
     if not provider:
@@ -703,9 +804,29 @@ def sync_provider_prs_from_github(
     )
     existing_by_link = {m.link.rstrip("/"): m for m in existing}
 
-    added, unchanged = _add_new_prs(session, provider_id, open_pulls, existing_by_link)
+    added, unchanged = _add_new_prs(
+        session,
+        provider_id,
+        open_pulls,
+        existing_by_link,
+        repo_owner,
+        repo_name,
+        github_token,
+    )
+    session.flush()
+    existing_all = (
+        session.scalars(
+            select(ProviderMetricPR).where(ProviderMetricPR.provider_id == provider_id)
+        )
+        .unique()
+        .all()
+    )
+    pull_by_link = _pull_dict_by_normalized_link(open_pulls)
+    _refresh_open_pr_metrics(
+        existing_all, pull_by_link, repo_owner, repo_name, github_token
+    )
     updated = _close_stale_pr_metrics(
-        existing, open_pr_links, repo_owner, repo_name, github_token
+        existing_all, open_pr_links, repo_owner, repo_name, github_token
     )
 
     session.commit()

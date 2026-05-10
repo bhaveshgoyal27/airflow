@@ -64,4 +64,6 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_table("provider_metrics_pr")
+    conn = op.get_bind()
+    if sa.inspect(conn).has_table("provider_metrics_pr"):
+        op.drop_table("provider_metrics_pr")
