@@ -117,7 +117,14 @@ celerybeat-schedule
 # virtualenv
 .venv*
 venv*
+.airflow-venv*
+airflow-venv*
 ENV/
+ENV/
+
+#json
+package-lock.json
+package.json
 
 # Spyder project settings
 .spyderproject
