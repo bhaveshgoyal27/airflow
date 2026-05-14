@@ -2,6 +2,25 @@
 
 This folder is the **handoff bundle** for the Provider Governance feature: system design, implementation history, local development, testing, and operational notes. Paths to source and tests are relative to the **repository root** (parent of `provider-governance-handoff/`).
 
+## Table of contents
+
+### This manual
+
+| Section | Description |
+|---------|-------------|
+| [Contents of this folder](#contents-of-this-folder) | Index of sibling Markdown in this folder |
+| [1. Requirements (maintainer view)](#1-requirements-maintainer-view) | Scope, in/out of scope, pointers to formulas |
+| [2. System design (summary)](#2-system-design-summary) | Mermaid flow, primary code locations, tokens |
+| [3. Architectural diagrams (static assets)](#3-architectural-diagrams-static-assets) | PNGs, class-structure note |
+| [4. User interface (as built)](#4-user-interface-as-built) | Routes, behavior pointers, UI artifacts |
+| [5. Style guide and developer workflow](#5-style-guide-and-developer-workflow) | UI/Python conventions, review |
+| [6. Test plan and regression playbook](#6-test-plan-and-regression-playbook) | Commands, manual smoke, numeric baseline |
+| [7. Deployment and operations](#7-deployment-and-operations) | Install, migrate, config, rollback |
+| [8. Document drift policy](#8-document-drift-policy) | Order of updates when behavior changes |
+| [Revision](#revision) | Handoff bundle layout note |
+
+Outbound links to **source files** are collected in **§2**. Links to **Apache contributor docs** (`AGENTS.md`, `contributing-docs/`) appear under **Contents of this folder** and in **§5**.
+
 ---
 
 ## Contents of this folder
