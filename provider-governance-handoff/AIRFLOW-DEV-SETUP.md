@@ -1,6 +1,8 @@
 # Airflow Dev Environment Setup Guide
 > Running Apache Airflow from source — macOS, Linux, and WSL (without Docker)
 
+This file lives under `provider-governance-handoff/`. Run every shell command from the **repository root** (the parent of this folder). If your shell is open here, run `cd ..` first.
+
 ---
 
 ## Prerequisites
@@ -36,9 +38,10 @@ sudo apt install -y nodejs
 
 ## 1. Fork & Clone
 
-Fork the repo on GitHub, then clone your fork:
+Fork [apache/airflow](https://github.com/apache/airflow) on GitHub under your own account, then clone **your** fork (replace `YOUR_GITHUB_USERNAME`):
+
 ```bash
-git clone https://github.com/bhaveshgoyal27/airflow.git
+git clone https://github.com/YOUR_GITHUB_USERNAME/airflow.git
 cd airflow
 ```
 

@@ -403,6 +403,6 @@ This section captures the additional implementation and quality work completed a
 
 ### 22.7 Development/testing process artifacts
 
-- **Testing plan artifact:** `PROVIDER_GOVERNANCE_TESTING_PLAN.md`
+- **Testing plan artifact:** [PROVIDER_GOVERNANCE_TESTING_PLAN.md](PROVIDER_GOVERNANCE_TESTING_PLAN.md)
   - Captures coding test strategy, integration/manual verification checklist, and report-oriented validation structure for this branch work.
 

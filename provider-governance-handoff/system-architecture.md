@@ -6,7 +6,7 @@ The Provider Governance Dashboard is an Airflow plugin that collects GitHub metr
 
 ## Architecture Diagram (Draft v1)
 
-![System Architecture](diagrams/architecture_diagram_v1.png)
+![System Architecture](../diagrams/architecture_diagram_v1.png)
 
 ## Components
 
@@ -32,9 +32,11 @@ The Provider Governance Dashboard is an Airflow plugin that collects GitHub metr
 | **Metrics Collector** | Collects raw data from the GitHub Client and computes per-provider metrics: PR volume/merge rate, issue volume/resolution rate, commit frequency, contributor count, and release cadence. |
 | **Health Scorer** | Computes a 0-100 health score using weighted dimensions aligned with AIP-95 governance thresholds: PR merge rate (25%), issue resolution rate (25%), contributor activity (25%), and release cadence (25%). |
 
-#### FastAPI Routes
+#### FastAPI Routes (conceptual)
 
-| Endpoint | Method | Description |
+Early design sketches used top-level paths such as `/providers` and `/metrics/provider/{id}`. The **implemented** Airflow 3.x UI API lives under **`/ui/provider-governance/…`** (list providers, summary, per-provider detail, issue/PR sync, and create/delete provider). See [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md) for the authoritative route list.
+
+| Endpoint (conceptual / doc sketch) | Method | Description |
 |----------|--------|-------------|
 | `/providers` | GET | List all tracked providers with their latest health metrics |
 | `/providers/{id}/collect` | POST | Trigger ad-hoc metrics collection for a provider (async) |
@@ -86,8 +88,9 @@ Stores temporal metric snapshots. Each collection creates a new row, preserving 
 | Page | Description |
 |------|-------------|
 | **Overview** | Provider table with health badges (green/yellow/red), summary statistics, sortable/filterable columns, top and bottom provider highlights |
-| **Detail** | Per-provider view with full issue list, issue age tracking, email steward action, and downloadable report |
-| **Trends** | Historical health score line charts, open issue trends over time, and side-by-side provider comparisons |
+| **Detail** | Per-provider view with issue and PR tables, health score and aggregates, issue age / resolution signals, steward `mailto:` link, and room for historical or chart-style insights **on the same page** (a separate **Trends** route was folded into Detail to reduce navigation and keep trend-style context next to the backlog it explains) |
+
+The shipped UI mounts under Airflow’s core UI (for example `/provider-governance` and `/provider-governance/:providerId`) and loads data from the FastAPI routes under `/ui/provider-governance/…` described in [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md).
 
 ## MVP Scope
 
@@ -101,6 +104,6 @@ Stores temporal metric snapshots. Each collection creates a new row, preserving 
 - Alert system with rule-based triggers and severity levels
 - Automated scheduled collection
 - Additional providers beyond the initial 4
-- Provider detail endpoint (`GET /providers/{id}`)
+- Richer trend APIs (for example dedicated time-series endpoints beyond the aggregates returned today by `GET /ui/provider-governance/providers/{provider_id}/detail`)
 - Alert management endpoints
 - Airflow Core integration (SessionDep, Plugin Manager, Nav Bar injection)
