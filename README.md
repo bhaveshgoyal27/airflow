@@ -18,6 +18,6 @@ The complete project handoff, setup notes, architecture details, implementation 
 
 ## Original Airflow Project
 
-<img src="https://github.com/apache/airflow/blob/main/docs/apache-airflow/img/logos/wordmark_1.png?raw=true" alt="Apache Airflow logo" width="260">
+<img src="https://github.com/apache/airflow/blob/main/airflow-core/docs/img/logos/wordmark_1.png?raw=true" alt="Apache Airflow logo" width="260">
 
 This work is built on Apache Airflow. For upstream documentation and general Airflow usage, see the [Apache Airflow documentation](https://airflow.apache.org/docs/) and the [Apache Airflow GitHub repository](https://github.com/apache/airflow).
