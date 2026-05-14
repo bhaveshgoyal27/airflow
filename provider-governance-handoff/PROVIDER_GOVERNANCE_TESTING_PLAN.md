@@ -1,11 +1,25 @@
 # Provider Governance Testing Plan
 
-This plan tracks testing coverage by category for Provider Governance (backend sync, API aggregation, and UI health rendering).
+This plan explains how the Provider Governance Dashboard is tested across backend logic, API integration, UI behavior, and user workflows.
+The testing focus is the dashboard path that collects GitHub provider data, computes health metrics, exposes API results, and renders maintainable governance views.
+Testing has already covered the highest-risk areas through automated unit, API, and UI tests, plus manual integration checks and user acceptance testing.
+Before deployment, the team should run the targeted automated suites, verify the local end-to-end workflow, and document any remaining risks or deferred enhancements.
 
-## 1) Unit tests (automated)
+## 1) Testing Types Covered
 
-- **Scope:** pure scoring and aggregation logic.
-- **Files:**
+- **Unit tests:** Validate deterministic backend logic, including health scoring, summary aggregation, GitHub metric derivation, and helper behavior.
+- **API and database-backed integration tests:** Verify Provider Governance route contracts, stored-row aggregation, sync delegation, authentication, and error handling.
+- **UI component and flow tests:** Check that overview and detail pages load data, refresh metrics, filter/sort rows, and render expected user-facing states.
+- **Manual end-to-end checks:** Exercise the combined local backend, database, GitHub sync behavior, and frontend dashboard before release.
+- **User acceptance testing:** Validate the dashboard with the client and external users against realistic governance and reporting tasks.
+- **Coverage and release-readiness checks:** Track automated suite coverage by functional area, record passing test counts, and identify what must be re-run before deployment.
+
+## 2) Unit Tests
+
+Unit tests cover the backend calculations that should behave the same way regardless of database state, UI rendering, or GitHub API availability.
+
+- **What was tested:** Health score computation, summary metric aggregation, GitHub payload-to-metric derivation, helper functions, empty input handling, threshold behavior, and placeholder exclusion.
+- **Files covered by the current unit suite:**
   - `airflow-core/tests/unit/provider_governance/test_health_score.py`
   - `airflow-core/tests/unit/provider_governance/test_health_score_additional.py`
   - `airflow-core/tests/unit/provider_governance/test_summary_metrics.py`
@@ -13,111 +27,110 @@ This plan tracks testing coverage by category for Provider Governance (backend s
   - `airflow-core/tests/unit/provider_governance/test_github_metric_derived.py`
   - `airflow-core/tests/unit/provider_governance/test_github_metric_derived_additional.py`
   - `airflow-core/tests/unit/provider_governance/test_github_metrics_helpers.py`
-- **Goal:** validate deterministic calculations and edge-case behavior:
-  - empty-data behavior
-  - score/status thresholds
-  - placeholder exclusion in summary
-  - GitHub payload-to-metric derivation caps
+- **Scoring behavior:** Tests should verify score/status thresholds, inactive-provider handling, PR merge-rate gating when no closed PRs exist, and the final score calibration that prevents active providers from being marked too harshly.
+- **Aggregation behavior:** Tests should confirm that summary cards and provider rows compute open issues, PR volume, average resolution time, contributor activity, and health status from the intended inputs.
+- **GitHub derivation behavior:** Tests should cover issue and PR payload parsing, caps or defaults used by derived metrics, and fallback behavior for mislabeled or incomplete GitHub data.
+- **Why this matters:** The health score is used as governance decision support. Unit tests reduce the risk of incorrect provider risk labels caused by formula regressions.
 
-## 2) API integration tests (automated, DB-backed)
+## 3) API and Integration Tests
 
-- **Scope:** UI API endpoints for provider governance.
-- **Files:**
+API integration tests cover the Provider Governance route layer and the database-backed behavior that connects stored metrics to the UI contract.
+
+- **What was tested:** Route contracts, database-backed summary computation, provider detail payloads, sync endpoint delegation, unauthenticated access behavior, and error mapping.
+- **Primary test file:**
   - `airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
-- **Goal:** verify endpoint contracts and DB integration:
-  - summary endpoint computes health fields from stored rows
-  - sync endpoints delegate to sync services and return payloads
-  - auth behavior (401 for unauthenticated access)
+- **Endpoint behavior:** Tests should verify that summary and detail endpoints return stable field names and compute health-related values from stored provider, issue, and PR rows.
+- **Sync behavior:** Tests should confirm that issue and PR sync endpoints delegate to the expected service functions and return payloads the frontend can consume.
+- **Authentication behavior:** Tests should include unauthenticated requests and confirm the expected `401` response rather than allowing route access without a valid user context.
+- **Data consistency behavior:** Tests should check that overview and detail data agree on provider identity, health score, status, and issue/PR counts.
+- **Risk patched in this plan:** GitHub data can be noisy or mislabeled, and API rate limits can make live refresh behavior unstable. Integration tests should use stable fixtures or mocked GitHub responses where possible, while manual release checks can cover authenticated live refresh behavior.
 
-## 3) UI tests (automated)
+## 4) UI Component and Flow Tests
 
-- **Scope:** ProviderGovernance overview/detail load and interaction flows.
-- **Files:**
+UI tests cover the React dashboard behavior that users see when they inspect provider health, refresh metrics, filter data, and move between overview and detail pages.
+
+- **What was tested:** Overview load, refresh flow, filters, sorting controls, provider detail load, issue filtering, status filtering, and key detail-page interactions.
+- **Files covered by the current UI suite:**
   - `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.load.test.tsx`
   - `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.refresh.test.tsx`
   - `airflow-core/src/airflow/ui/src/pages/ProviderGovernance.filters.test.tsx`
   - `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.load.test.tsx`
   - `airflow-core/src/airflow/ui/src/pages/ProviderGovernanceDetail.interactions.test.tsx`
-- **Goal:** ensure frontend wiring works:
-  - page renders health from summary API
-  - refresh triggers issue + PR sync endpoints, then reloads data
-  - overview filters/sort controls update rendered provider rows
-  - detail page issue filtering and status filtering behave as expected
+- **Overview behavior:** Tests should confirm that the overview page renders provider rows and health summary data from the summary API.
+- **Refresh behavior:** Tests should confirm that refresh triggers issue and PR sync calls, reloads data afterward, and presents a completion or failure path to the user.
+- **Filtering and sorting behavior:** Tests should confirm that provider filters, search, sort controls, issue filters, and status filters change the rendered rows as expected.
+- **Detail-page behavior:** Tests should confirm that the detail page loads issue and PR tables, displays a health score/status consistent with the overview, and supports the intended interactions.
+- **Known caveat:** Some refresh-flow tests may emit React `act(...)` warnings while still passing assertions. These warnings should be reviewed, but they do not automatically mean the tested behavior failed.
 
-## 4) Manual integration checks (repeatable)
+## 5) Manual End-to-End Checks
 
-Run after deploying API + UI changes locally:
+Manual checks cover the combined local system after the API, database, GitHub sync path, and UI have been deployed together.
 
-1. Open Provider Governance overview page.
-2. Confirm initial provider list and summary rows load.
-3. Click **Refresh metrics** once and wait for completion toast.
-4. Verify at least one provider row updates counts/health.
-5. Open provider detail page and verify:
-   - issue and PR tables load
-   - health score/status match overview
-6. Temporarily invalidate GitHub token and verify refresh failure toast path.
+- **What was tested:** Dashboard load, provider summary rendering, metric refresh, detail-page consistency, issue/PR table rendering, and refresh failure handling.
+- **Repeatable local checklist:**
+  1. Open the Provider Governance overview page.
+  2. Confirm the initial provider list and summary cards load.
+  3. Click **Refresh metrics** once and wait for the completion toast.
+  4. Verify that at least one provider row updates counts, freshness, or health-related fields.
+  5. Open a provider detail page and confirm that issue and PR tables load.
+  6. Confirm that health score and status match between the overview and detail pages.
+  7. Temporarily invalidate or omit the GitHub token and confirm that the refresh failure toast path is visible.
+- **Large-test setup needs:** A running backend, running frontend, seeded test database, and either mocked GitHub responses or an authenticated GitHub token.
+- **Deployment gate:** These checks should be run before demo or deployment because they catch environment and wiring issues that isolated unit or component tests cannot fully cover.
 
-## 5) User testing process (at least 3 users)
+## 6) User Acceptance Testing
 
-### Participants
+User acceptance testing checked whether the dashboard supports the governance workflows expected by the client and whether external users can complete core tasks after local setup.
 
-Three CS 5150 classmates (anonymous); same protocol and tasks for each.
+- **Client UAT summary:** Client walkthroughs covered viewing overall provider health, sorting and filtering providers, opening provider detail pages, inspecting issue/PR data, reviewing the health score breakdown, downloading a report, refreshing a provider, adding a provider, and deleting a provider with confirmation.
+- **Client UAT outcome:** The agreed scenarios executed successfully and were accepted by the client.
+- **External UAT setup:** Three external participants cloned the repository, followed setup instructions, ran the system locally, selected a task from a provided task list, and completed a short survey afterward.
+- **External UAT tasks completed:**
+  - Existing issues task: A participant tested the Snowflake provider and confirmed that open and closed issues appeared with dates and status.
+  - Live issue task: A participant tested the Amazon provider by creating a live issue, seeing it appear as open, closing it, and confirming that status and dates updated.
+  - Report task: A participant tested the Google provider by downloading a CSV report and confirming that expected open, closed, and live issue data appeared correctly.
+- **External UAT outcome:** Final user testing reported no blocking bugs or unexpected behavior. Setup took about 15-30 minutes per participant.
+- **User feedback captured:** Participants suggested adding PDF export in addition to CSV, making tables sortable by any column, and adding a provider-detail freshness indicator similar to the overview dashboard.
+- **Risk to verify:** Earlier testing mentioned a possible mismatch between an issue status and its open/closed date. Even though the final UAT summary reported no bugs, this should be treated as a regression scenario to verify before deployment.
 
-- **User A** — peer tester 1 (background: backend-heavy)
-- **User B** — peer tester 2 (background: full-stack)
-- **User C** — peer tester 3 (background: minimal prior Airflow UI exposure)
+## 7) Coverage Metrics Reported
 
-### Tasks
+Coverage is reported using the evidence available from the current testing work. These metrics should not be described as line or branch coverage unless a separate coverage report is generated.
 
-1. Find the lowest-health provider in overview.
-2. Open details and identify whether backlog or activity is driving health.
-3. Trigger refresh and describe what changed.
+- **Functional scope coverage:** 100% of core changed functional areas are covered by at least one automated test suite. The covered areas are backend logic, API contract/database-backed behavior, and UI flow behavior.
+- **UI execution metric:** The split UI run reported 11/11 tests passing across 5/5 UI test files.
+- **Automated test type coverage:** Unit, API/integration, and UI component/flow test suites all exist for Provider Governance.
+- **UAT participation metric:** User acceptance testing included the client walkthrough plus three external participants completing task-based validation.
+- **Manual workflow coverage:** The repeatable manual checklist covers overview load, refresh, detail view consistency, table rendering, and refresh failure handling.
+- **Recommended improvement:** If the final project report requires a true numeric code coverage metric, run backend tests with coverage enabled and report line or branch coverage separately from the functional coverage statements above.
 
-### Outcomes (synthesis)
+## 8) Testing Strategy Before Deployment
 
-| User | Observed friction | Confusing labels/metrics | Suggested UI change | Action item |
-|------|-------------------|---------------------------|---------------------|---------------|
-| **A** | Wanted a one-line hint for what “PR merge rate” counts (open vs closed PR rows). | “Contributors” as a summed signal was easy to misread as unique people. | Tooltip or `i` next to PR merge rate and contributors on detail. | Add short field descriptions in UI or link to [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md) §18. |
-| **B** | Refresh took long with several providers; unclear per-provider progress. | Health status bands felt strict until explained (score vs label). | Per-provider spinner or step text during sequential sync. | Consider batching or progress UI (post-MVP if time). |
-| **C** | First navigation: Admin → Provider Governance was not obvious. | “Last updated” hidden until first load completed caused a brief empty header. | Keep skeleton or “Loading…” in header area until timestamp available. | Already partially mitigated; confirm empty-state copy on slow networks. |
+The deployment strategy is to run small automated tests on every meaningful change and reserve full local workflow checks for release validation.
 
-All three completed the three tasks without blocking errors. Common theme: **clarity of metric definitions** and **visibility during refresh** ranked above new features.
+- **During development:** Add or update unit tests alongside health scoring, aggregation, GitHub derivation, or helper changes.
+- **After API changes:** Add or update route tests immediately so frontend-facing contracts, auth behavior, and error mapping remain stable.
+- **After UI changes:** Add or update UI tests in the same task for loading, refresh, filtering, sorting, and detail interactions.
+- **Before merge:** Run the targeted backend and UI automated suites listed below.
+- **Before release or demo:** Run the manual end-to-end checklist with a seeded database and either mocked GitHub responses or an authenticated GitHub token.
+- **Triage rule:** Must-fix items include broken route contracts, incorrect health status, failed refresh behavior, data mismatch between overview and detail, and issue status/date inconsistencies. Post-release enhancements include PDF export, broader table sorting, and additional freshness indicators if the core workflow remains correct.
 
-## 6) Coverage reporting
-
-Recommended commands:
+## 9) Recommended Commands
 
 - Backend provider-governance unit/API tests:
   - `pytest airflow-core/tests/unit/provider_governance airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
-- UI tests (split files):
+- UI tests from the UI workspace:
   - `pnpm -s vitest run src/pages/ProviderGovernance.load.test.tsx src/pages/ProviderGovernance.refresh.test.tsx src/pages/ProviderGovernance.filters.test.tsx src/pages/ProviderGovernanceDetail.load.test.tsx src/pages/ProviderGovernanceDetail.interactions.test.tsx`
+- Optional backend coverage command if a line or branch metric is required:
+  - `pytest --cov=airflow --cov-report=term-missing airflow-core/tests/unit/provider_governance airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
 
-### Numeric metrics for project reports
-
-Use the following **stable, automatable counts** (re-verify after large refactors with `pytest --collect-only` / Vitest summary):
-
-| Metric | Value | How to reproduce |
-|--------|------:|------------------|
-| Provider Governance **Python unit** test cases (`airflow-core/tests/unit/provider_governance/`) | **26** | From repo root: `PYTHONPATH=devel-common/src:airflow-core/src:task-sdk/src uv run pytest --collect-only -q airflow-core/tests/unit/provider_governance` (or use **Breeze** / a synced `uv` env per `AGENTS.md` if imports fail). |
-| Provider Governance **API** test cases (`test_provider_governance.py`, DB-backed) | **10** | Same as above on `airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`. |
-| Provider Governance **UI** test cases (split Vitest files) | **11** (5 files) | `cd airflow-core/src/airflow/ui` then `pnpm -s vitest run …` (see command above); expect **11 passed**. |
-| **Combined automated tests (governance-focused)** | **47** | Sum of the three rows above. |
-
-**Line / branch coverage (optional):** From repo root, with a full dev environment (for example **Breeze** or `uv sync` per `AGENTS.md` so `create_app` and providers resolve), run:
-
-```bash
-pytest airflow-core/tests/unit/provider_governance \
-  airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py \
-  --cov=airflow.provider_governance \
-  --cov=airflow.api_fastapi.core_api.routes.ui.provider_governance \
-  --cov-report=term-missing
-```
-
-For **UI line coverage**, `pnpm vitest run --coverage` uses the whole `src/**/*.tsx` include list, so the **global** `% Stmts` is a poor governance-only metric. Prefer reporting **11/11 tests passing** plus, if needed, a **file-scoped** coverage run configured in `vite.config.ts` (narrow `coverage.include`) for `ProviderGovernance*.tsx` only.
-
-## 7) Known test-environment caveats
+## 10) Known Test-Environment Caveats
 
 - UI tests require `@testing-library/dom` to be present in the UI workspace dependencies.
-- Some refresh-flow tests may emit React `act(...)` warnings in console output while still passing assertions.
+- Refresh and sync checks that use live GitHub data may be affected by token configuration, API rate limits, or changes in real issue/PR data.
+- Tests for GitHub-derived behavior should prefer fixtures or mocked responses for repeatability.
+- Manual checks should record the database seed state, provider tested, GitHub token mode, and observed refresh result so failures can be reproduced.
 
-For the course report, cite at least one numeric metric from the **Numeric metrics** table above (test counts) and optionally **pytest/V8 coverage %** after a successful local or CI run.
+## Closing Note
+
+The Provider Governance Dashboard testing plan treats automated tests, manual integration checks, and user acceptance testing as complementary evidence. Health scores should remain decision support rather than automatic governance decisions, so testing must focus on correctness, consistency, and clear reporting before deployment.
