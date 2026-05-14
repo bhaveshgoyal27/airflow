@@ -26,12 +26,12 @@ Apache-wide contributor setup (virtualenv, Breeze, prek) remains in the repo roo
 **In scope (as implemented):**
 
 - Registry of tracked providers and persisted issue/PR rows synced from GitHub (`apache/airflow`).
-- Aggregated summary metrics, health score, and admin UI: overview + per-provider detail.
+- Aggregated summary metrics, health score, and admin UI: overview + per-provider detail (including **CSV report download** from the detail page).
 - Ad-hoc refresh (no continuous real-time monitoring requirement in product docs).
 
-**Out of scope** for this feature slice: deprecating providers automatically, non-GitHub hosts, multi-repo aggregation beyond this monorepo.
+**Out of scope** for this feature slice: deprecating providers automatically, non-GitHub hosts, multi-repo aggregation beyond this monorepo, and **SMTP-based steward alerts** (de-scoped; see Note in [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md)).
 
-**Functional detail and formulas:** see [PROVIDER_GOVERNANCE_CHANGES.md §18](PROVIDER_GOVERNANCE_CHANGES.md) and the tables in [system-architecture.md](system-architecture.md) (note: schema narrative there is conceptual; ORM and migrations in the changes doc win on conflicts).
+**Functional detail and formulas:** see the **Components** table in [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md), the closing **Note** (inline docs in `health_score.py` and `summary_metrics.py`), and [system-architecture.md](system-architecture.md) for draft context only (if narrative conflicts with code or migrations, code and [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md) win).
 
 ---
 
@@ -110,7 +110,7 @@ These PNGs are **course / design artifacts**. When the product diverges, update 
 
 **Authoritative detail:** [PROVIDER_GOVERNANCE_TESTING_PLAN.md](PROVIDER_GOVERNANCE_TESTING_PLAN.md).
 
-**Quick reproduction (from repository root):**
+**Quick reproduction** (same commands as [PROVIDER_GOVERNANCE_TESTING_PLAN.md §9](PROVIDER_GOVERNANCE_TESTING_PLAN.md); from repository root unless noted):
 
 1. **Python unit + API (Provider Governance)** — use a full dev environment ([AGENTS.md](../AGENTS.md), Breeze, or `uv sync` so `tests_common` and providers resolve):
 
@@ -134,9 +134,11 @@ These PNGs are **course / design artifacts**. When the product diverges, update 
      src/pages/ProviderGovernanceDetail.interactions.test.tsx
    ```
 
-3. **Manual smoke:** follow §4 in [PROVIDER_GOVERNANCE_TESTING_PLAN.md](PROVIDER_GOVERNANCE_TESTING_PLAN.md).
+3. **Manual smoke:** follow **§5 — Manual End-to-End Checks** in [PROVIDER_GOVERNANCE_TESTING_PLAN.md](PROVIDER_GOVERNANCE_TESTING_PLAN.md).
 
-**Numeric regression baseline:** see the “Numeric metrics” table in the testing plan (counts of automated tests). Refresh those counts after adding or removing tests (`pytest --collect-only`, Vitest summary).
+4. **Optional line coverage** for governance modules: see **§9** in [PROVIDER_GOVERNANCE_TESTING_PLAN.md](PROVIDER_GOVERNANCE_TESTING_PLAN.md).
+
+**Numeric regression baseline:** **§7 — Coverage Metrics Reported**, including the **Automated test counts** table (26 + 10 + 11 = **47**), in [PROVIDER_GOVERNANCE_TESTING_PLAN.md](PROVIDER_GOVERNANCE_TESTING_PLAN.md). Re-verify counts after adding or removing tests (`pytest --collect-only`, Vitest summary).
 
 ---
 

@@ -104,6 +104,19 @@ Coverage is reported using the evidence available from the current testing work.
 - **Manual workflow coverage:** The repeatable manual checklist covers overview load, refresh, detail view consistency, table rendering, and refresh failure handling.
 - **Recommended improvement:** If the final project report requires a true numeric code coverage metric, run backend tests with coverage enabled and report line or branch coverage separately from the functional coverage statements above.
 
+### Automated test counts (regression baseline)
+
+Use these counts as a quick regression signal after refactors (re-verify with `pytest --collect-only` and the Vitest summary).
+
+| Suite | Test cases (approx.) | How to re-count |
+|-------|---------------------:|-----------------|
+| Python unit (`airflow-core/tests/unit/provider_governance/`) | 26 | `pytest --collect-only -q airflow-core/tests/unit/provider_governance` |
+| API / DB-backed (`test_provider_governance.py`) | 10 | `pytest --collect-only -q airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py` |
+| UI (split Vitest files in §4) | 11 | `pnpm -s vitest run …` — expect **11 passed** |
+| **Total governance-focused automated tests** | **47** | Sum of rows above |
+
+From a minimal checkout, `pytest` may require `PYTHONPATH` (see [PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md §6](PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md)); **Breeze** or a full `uv sync` per [AGENTS.md](../AGENTS.md) is recommended for parity with CI.
+
 ## 8) Testing Strategy Before Deployment
 
 The deployment strategy is to run small automated tests on every meaningful change and reserve full local workflow checks for release validation.
@@ -111,18 +124,21 @@ The deployment strategy is to run small automated tests on every meaningful chan
 - **During development:** Add or update unit tests alongside health scoring, aggregation, GitHub derivation, or helper changes.
 - **After API changes:** Add or update route tests immediately so frontend-facing contracts, auth behavior, and error mapping remain stable.
 - **After UI changes:** Add or update UI tests in the same task for loading, refresh, filtering, sorting, and detail interactions.
-- **Before merge:** Run the targeted backend and UI automated suites listed below.
+- **Before merge:** Run the targeted backend and UI automated suites listed in **§9**.
 - **Before release or demo:** Run the manual end-to-end checklist with a seeded database and either mocked GitHub responses or an authenticated GitHub token.
 - **Triage rule:** Must-fix items include broken route contracts, incorrect health status, failed refresh behavior, data mismatch between overview and detail, and issue status/date inconsistencies. Post-release enhancements include PDF export, broader table sorting, and additional freshness indicators if the core workflow remains correct.
 
 ## 9) Recommended Commands
 
-- Backend provider-governance unit/API tests:
-  - `pytest airflow-core/tests/unit/provider_governance airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
-- UI tests from the UI workspace:
+All paths are from the **repository root** (parent of `provider-governance-handoff/`).
+
+- Backend provider-governance unit/API tests (same targets as [PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md §6](PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md)):
+  - `PYTHONPATH="devel-common/src:airflow-core/src:task-sdk/src" uv run pytest airflow-core/tests/unit/provider_governance airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
+  - If imports fail, run the same test paths inside **Breeze** or after `uv sync` per [AGENTS.md](../AGENTS.md).
+- UI tests from `airflow-core/src/airflow/ui`:
   - `pnpm -s vitest run src/pages/ProviderGovernance.load.test.tsx src/pages/ProviderGovernance.refresh.test.tsx src/pages/ProviderGovernance.filters.test.tsx src/pages/ProviderGovernanceDetail.load.test.tsx src/pages/ProviderGovernanceDetail.interactions.test.tsx`
-- Optional backend coverage command if a line or branch metric is required:
-  - `pytest --cov=airflow --cov-report=term-missing airflow-core/tests/unit/provider_governance airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py`
+- Optional backend coverage (narrow to governance modules — do **not** use a repo-wide `--cov=airflow` for this feature’s report unless you intend whole-core numbers):
+  - `pytest airflow-core/tests/unit/provider_governance airflow-core/tests/unit/api_fastapi/core_api/routes/ui/test_provider_governance.py --cov=airflow.provider_governance --cov=airflow.api_fastapi.core_api.routes.ui.provider_governance --cov-report=term-missing`
 
 ## 10) Known Test-Environment Caveats
 
