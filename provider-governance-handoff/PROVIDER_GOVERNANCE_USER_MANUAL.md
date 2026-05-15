@@ -269,7 +269,7 @@ Inactive providers (those with `is_active` set to false) receive a multiplier th
 | Term | Definition |
 |---|---|
 | **AIP-95** | Apache Airflow Improvement Proposal 95, which formalizes provider lifecycle stages and governance principles. The dashboard's scoring and lifecycle fields align with AIP-95 vocabulary. |
-| **Health Score** | A composite 0–100 score representing the maintenance health of a single provider.|
+| **Health Score** | A composite 0-100 score representing the maintenance health of a single provider.|
 | **Health Status** | The categorical band (Healthy / Warning / Critical) derived from the Health Score. |
 | **Lifecycle Stage** | A provider's classification under AIP-95: `incubation`, `production`, `mature`, or `deprecated`. Stored on the provider record and visible as a tag badge on the Detail page. |
 | **PMC** | Apache Airflow Project Management Committee - the governing body for the Airflow project and the primary audience for this dashboard. |
@@ -282,10 +282,10 @@ Inactive providers (those with `is_active` set to false) receive a multiplier th
 ## 7. FAQ and Troubleshooting
 
 **Q: I just added a provider but the table shows no issues or PRs. What's wrong?**
-Adding a provider only creates the registry entry. To populate metrics, click **Refresh metrics** on the Overview page (§4.3). The first refresh may take longer than subsequent ones.
+Adding a provider only creates the registry entry. To populate metrics, click **Refresh metrics** on the Overview page. The first refresh may take longer than subsequent ones.
 
 **Q: A provider I expect to see is showing as "Critical" - is something broken?**
-No. The Critical band means the provider's combined metrics indicate a maintenance gap. Click into the provider's Detail page (§4.2) to see which signals (backlog, resolution time, PR activity) are driving the score. This is exactly the signal the dashboard is designed to surface.
+No. The Critical band means the provider's combined metrics indicate a maintenance gap. Click into the provider's Detail page to see which signals (backlog, resolution time, PR activity) are driving the score. This is exactly the signal the dashboard is designed to surface.
 
 **Q: Why does the "Last updated" timestamp not change after I click Refresh metrics?**
 The timestamp updates only after the refresh completes successfully. If the toast indicates an error (for example, hitting a GitHub rate limit or an invalid GitHub token), the timestamp does not advance. Check the error message in the toast and consult the maintainer manual.
