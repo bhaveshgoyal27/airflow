@@ -92,6 +92,8 @@ Stores temporal metric snapshots. Each collection creates a new row, preserving 
 
 The shipped UI mounts under Airflow’s core UI (for example `/provider-governance` and `/provider-governance/:providerId`) and loads data from the FastAPI routes under `/ui/provider-governance/…` described in [PROVIDER_GOVERNANCE_CHANGES.md](PROVIDER_GOVERNANCE_CHANGES.md).
 
+Screenshots of the running UI are under [`../diagrams/ui/`](../diagrams/ui/) and are embedded in [PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md §4](PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md).
+
 ## MVP Scope
 
 - **Providers:** AWS, GCP, Azure, Snowflake
