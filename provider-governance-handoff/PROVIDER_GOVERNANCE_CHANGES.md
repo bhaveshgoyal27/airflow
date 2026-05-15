@@ -11,9 +11,9 @@ The dashboard was scoped to four initial providers (AWS, GCP, Snowflake, Azure) 
 
 | Component | File(s) | Description |
 |---|---|---|
-| Navigation & Routing | `AdminButton.tsx`, `router.tsx` | Adds a "Provider Governance" entry to the Admin dropdown (gated on the existing Providers permission) and registers the two client-side routes: `/provider-governance` and `/provider-governance/:providerId`. |
-| Overview Page | `pages/ProviderGovernance.tsx` | Renders the provider registry as a health-sorted table with a summary stats strip, health-status badge counts, search input, sort control, and a "Refresh Metrics" button that triggers per-provider GitHub sync. |
-| Detail Page | `pages/ProviderGovernanceDetail.tsx` | Shows a single provider's health score card, aggregated issue and PR statistics, an issues table with search and status filter, a PR table, a data-freshness indicator, an initials avatar, an Email Steward mailto link, and a CSV report download. |
+| Navigation & Routing | `AdminButton.tsx`, `router.tsx` | Adds a "Provider Governance" entry to the Admin dropdown (gated on the existing Providers permission) and registers the two client-side routes: `/provider-governance` and `/provider-governance/:providerId`. **UI screenshot:** [`diagrams/ui/provider-governance-entry-point.jpeg`](../diagrams/ui/provider-governance-entry-point.jpeg). |
+| Overview Page | `pages/ProviderGovernance.tsx` | Renders the provider registry as a health-sorted table with a summary stats strip, health-status badge counts, search input, sort control, and a "Refresh Metrics" button that triggers per-provider GitHub sync. **UI screenshot:** [`diagrams/ui/home-page.jpeg`](../diagrams/ui/home-page.jpeg). |
+| Detail Page | `pages/ProviderGovernanceDetail.tsx` | Shows a single provider's health score card, aggregated issue and PR statistics, an issues table with search and status filter, a PR table, a data-freshness indicator, an initials avatar, an Email Steward mailto link, and a CSV report download. **UI screenshot:** [`diagrams/ui/provider-detail-view.jpeg`](../diagrams/ui/provider-detail-view.jpeg). |
 | FastAPI Routes | `routes/ui/provider_governance.py` | REST endpoints mounted under **`/ui/provider-governance/`** (e.g. `GET`/`POST`/`DELETE` **`/providers`**, `POST` **`/sync/{id}`**, `POST` **`/sync-pr/{id}`**, `GET` **`/providers/summary`**, `GET` **`/providers/{id}/detail`**). |
 | GitHub Metrics Client | `provider_governance/github_metrics.py` | Authenticated GitHub REST API client (PAT-based, 5,000 req/hr). Implements insert-new / refresh-open / close-stale sync semantics for both issues and PRs. Includes provider-label matching with a fallback chain. |
 | Derived Metrics Helpers | `provider_governance/github_metric_derived.py` | Extracts row-level contributor signals and commit counts from raw GitHub API payloads. Signals are capped at `CONTRIBUTOR_SIGNAL_CAP = 50` to prevent score distortion from high-activity outliers. |
@@ -22,6 +22,8 @@ The dashboard was scoped to four initial providers (AWS, GCP, Snowflake, Azure) 
 | ORM Models | `models/provider_governance.py` | Defines `Provider`, `ProviderMetric`, and `ProviderMetricPR` SQLAlchemy models. `ProviderMetric` rows track issues; `ProviderMetricPR` rows track pull requests; both link to `Provider` with ON DELETE CASCADE. |
 | Alembic Migrations | `migrations/versions/0105` – `0110` | Incremental schema changes: core tables (`0105`), snapshot columns (`0106`), default seed (`0107`, later neutralized), PR table (`0108`), seed removal (`0109`), and an idempotent repair path for partial setups (`0110`). |
 | Test Suite | `tests/unit/provider_governance/`, `ui/src/pages/*.test.tsx` | Backend unit tests covering health scoring, summary aggregation, and GitHub derivation helpers; API contract tests for all provider governance routes; UI integration tests split across five focused files (load, refresh, filters, detail load, detail interactions). |
+
+Additional UI captures for **add** and **delete** provider flows: [`diagrams/ui/add-provider.jpeg`](../diagrams/ui/add-provider.jpeg), [`diagrams/ui/delete-provider.jpeg`](../diagrams/ui/delete-provider.jpeg). Full gallery: [PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md §4](PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md).
 
 ---
 

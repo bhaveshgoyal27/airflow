@@ -14,7 +14,7 @@ The complete project handoff, setup notes, architecture details, implementation 
 - [`Summary of Changes`](provider-governance-handoff/PROVIDER_GOVERNANCE_CHANGES.md): implemented routes, migrations, UI behavior, metric formulas, and code locations.
 - [`Testing Plan`](provider-governance-handoff/PROVIDER_GOVERNANCE_TESTING_PLAN.md): automated tests, manual integration checks, coverage notes, and user acceptance testing.
 - [`Dev Environment Setup`](provider-governance-handoff/AIRFLOW-DEV-SETUP.md): local setup, install steps, UI build notes, and run commands.
-- [`Diagrams`](provider-governance-handoff/diagrams.md): deployment and component integration diagrams.
+- [`Deployment diagram`](diagrams/deployment_diagram.png) and [`Component integration diagram`](diagrams/component_diagram.png): static UML-style views (also embedded in [Maintainer Manual §3](provider-governance-handoff/PROVIDER_GOVERNANCE_MAINTAINER_MANUAL.md)).
 
 ## Original Airflow Project
 
