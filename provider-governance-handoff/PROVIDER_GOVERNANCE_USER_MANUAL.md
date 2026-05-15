@@ -1,4 +1,4 @@
-# Provider Governance Dashboard — User Manual
+# Provider Governance Dashboard - User Manual
 
 > Audience: **Apache Airflow Project Management Committee (PMC)** members and other governance roles who use the Provider Governance Dashboard inside the Airflow UI.
 >
@@ -48,7 +48,7 @@ The goal: make it easy for PMC members to spot providers that need attention, an
 | Role | Relationship to the dashboard |
 |---|---|
 | **PMC member** *(primary user)* | Full read access. Adds providers, refreshes metrics, reviews health scores, downloads reports, and decides when a provider needs steward intervention. |
-| **Provider Steward** | Not a direct user of the dashboard in the current scope. When a PMC member identifies a provider that needs attention, the steward is contacted out-of-band (e.g. email or Slack) and is responsible for the deeper, service-level investigation. |
+| **Provider Steward** | Not a direct user of the dashboard in the current scope. When a PMC member identifies a provider that needs attention, the steward is contacted (e.g. email or Slack) and is responsible for the deeper, service-level investigation. |
 | **Airflow developers and end users** | Out of scope for this dashboard. The dashboard is intentionally a **PMC-only view**. |
 
 ---
@@ -71,7 +71,7 @@ The Provider Governance entry in the Admin menu is visible to users who have the
 
 ## 4. Tasks
 
-Each task below follows the same shape: **what you're doing**, **steps**, and **what to expect**.
+Each task below follows: **what you're doing**, **steps**, and **what to expect**.
 
 ---
 
